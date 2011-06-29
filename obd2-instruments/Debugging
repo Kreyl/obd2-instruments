@@ -1,0 +1,50 @@
+
+For those familar with more common networks, CAN bus has a few
+surprising properties.  A CAN bus needs termination and at least two
+active nodes to work correctly.  It has a fixed node ID assignment that
+can result in conflicts, and these conflict can masquerade as physical
+layer ("wiring") problem.
+
+Termination
+
+A CAN bus is supposed to have 120 ohm termination resistor at each
+end.  For testing on a short network I use a single 80 ohm resistor.
+It will even work with a single 120 ohm resistor.  But it won't work
+without a resistor, and may not work with more than two.
+
+Automotive CAN networks usually have the terminating resistors designed
+into the body wiring.  Individual nodes generally have no termination
+resistor.  This includes plug-in OBD2 readers, such as a ELM327 reader.
+
+Industrial CAN devices often have a jumper option on each node to enable
+a built-in 120ohm termination resistor.  This initially seems
+convenient, but is more likely to lead to an incorrectly terminated
+network.
+
+Network partners
+
+CAN bus relies on active listeners to correctly transmit a frame.  Close
+to the end of transmission the sender briefly listens.  All listeners
+that have correctly received the frame to that point send a single ACK bit.
+
+If the sender does not hear an ACK, it assumes that the transmission was
+corrupted.  Unexpectedly, any listeners that don't hear a valid ACK bit
+also assume that the frame was corrupted, even if they thought they sent
+an ACK bit.
+
+ELM327 adapters have no termination and default to silent mode unless
+they are requesting data.  That means they won't send an ACK bit.  If
+there is not another active lister, they won't receive the frame and the
+link partner will always get a transmit error.
+
+Semi-passive listeners like the ELM327 can result in a locked-in-failure
+cycle.  A CAN node can try to transmit and give up from failures.  While
+it is recovering it won't send ACK bits.  The ELM327 then tries to send,
+but gets transmit errors from no ACK bits.  It gives up and goes
+inactive just as the other node tries to respond.
+
+If using an ELM327 v1.42b and later as the only other bus device, turn
+silent monitoring off with "AT CSM1".  Otherwise it will only provide
+the ACK to messages it is listening to, or while it is waiting for a
+response.
+

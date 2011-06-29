@@ -1,0 +1,65 @@
+This directory contains the source code for an OBD2 instrument cluster
+controller.
+
+The code is designed for a ATMega processor, the type used on Arduino
+boards.  It does not use the Arduino programming environment, as that
+does not have the flexibility and performance needed.  But by using the
+same processor and I/O connections we can use the hardware modules
+designed for that community.
+
+The OBD2 communication is done over CAN bus.  The base implementation
+uses a MCP2515 CAN controller connected by SPI.  A bus interface layer
+is provided to use other CAN controllers, such as the on-chip controller
+AT90CAN series.
+
+History
+
+This code started as the firmware for our 'QAR' EV motor controller.  It
+was modified to be a drop-in addition to the Cougar motor controller.
+That legacy is still visible in the structure.
+
+Files
+
+Makefile contains the rules for building the firmware.  It should build
+the firmware without changes, but will likely need to be edited for
+downloading the firmware -- at minimum to match the USB port used on
+your OS.
+
+To build the firmware you'll need the following packages
+gcc-avr		GCC compiler set for the AVR processor
+binutils-avr	Object file utilities such as the linker
+avr-libc	Header files for the hardware
+avrdude		A program to download the firmware (alternate: avrprog)
+
+vvvvroom.h is the header file for the whole program.  It contains much
+of the documentation for the variables.
+
+vvvvroom.c is the main driver loop code.  It contains most of the hardware
+setup and operating logic.
+
+func-test.c is an alternate version of vvvvroom.c that contains code
+currently in development, or just crude hacks for hardware debugging.
+
+pi-loop.c is the Proportional-Integral control loop.  It is called each
+time we have new current sensor measurement (about 4KHz).  It almost
+exclusively works with sensor values gathered in vvvvroom.c and state
+variables, with the exception that it directly writes the timer compare
+register to set the PWM percentage.
+
+serial.c interacts with the UART hardware, and implements a simple
+character I/O queue.  It is paired with printf.c, a basic integer-only
+printf() implementation.  None of the interfaces exactly match
+traditional C library functions, in part because the AVR Harvard
+architecture results in constant strings (in program memory) being
+different than generated strings (in data memory).
+
+command-plus.c implements a simple command interpreter.  It can parse a
+command line just barely well enough to run a function or set a
+variable.  The command interpreter is sleazy (bad parsing, zero or one
+decimal parameter) but improvements would take precious memory.
+
+tach.c and tach16.c implement the tachometer calculation.  These are
+likely to be recombined, and perhaps moved back into vvvvroom.c once the
+best version is decided.
+
+spi-adc.c has the code to use a MCP3008 series SPI connected A/D converter.

@@ -1,0 +1,30 @@
+Instructions for adding CAN bus support to the Cougar firmware
+
+
+Put these three files into the Cougar source directory
+
+can-bus.c
+can.h
+cougar-exports.h
+
+Add can-bus.o as a Makefile rule by inserting these three lines.
+
+cougar.elf:	can-bus.o
+can-bus.o:	CPFLAGS+=-DCOUGAR
+can-bus.o:	cougar.h cougar-export.h can.h
+
+Modify cougar.c around line 1090 to add the CAN polling function call:
+
+		// do thermal cutback (based on real time data)
+		thermal_cutback();
++		{ void CAN_poll(void);	CAN_poll(); }
+		// if rtd_period not zero display rt data at specified intervals
+
+Now the complicated part: modify can-bus.c to match your hardware.
+
+This should mostly be changing the pin settings for the SPI lines.
+Search for 'PORTB' and 'DDRB' as a start.
+
+Consider using the raw_to_calibrated() function to report the controller
+temperature.  The numbers in the table are completely made up, so you'll
+eventually need to re-write the map.
