@@ -241,17 +241,9 @@ unsigned int adc_baseline(int8_t channel);
 extern volatile uint32_t serial_txbytes;
 extern volatile uint32_t serial_rxbytes;
 /* Get character from input FIFO, return -1 if empty. */
-int uart_getch(void);
+int uart_getchar(void);
 /* Put character to the output, return -1 if failed-full. */
-unsigned char uart_putch(char c);
-/* Send the uart_str to the output, busy-waiting until done. */
-extern char uart_str[];
-void uart_putstr(void);
-/* Put a constant (program address space) string to the UART. */
-void uart_print(const PGM_P str);
-/* Sleazy number-to-string conversion. */
-void u16_to_str(char *str, unsigned val, unsigned char digits);
-void u16x_to_str(char *str, unsigned val, unsigned char digits);
+unsigned char uart_putchar(char c);
 /* Configure the UART. */
 void setup_uart(void);
 

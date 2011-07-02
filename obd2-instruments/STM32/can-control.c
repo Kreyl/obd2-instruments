@@ -555,7 +555,7 @@ int main(void)
 		int c;
 
 		/* See if we have any communication waiting. */
-		c = uart_getch();
+		c = uart_getchar();
 		if (c >= 0) {
 			do_serial_port_char((unsigned char)c);
 			tm_last_command = get_time();

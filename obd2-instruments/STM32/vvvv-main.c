@@ -398,7 +398,7 @@ int main(void)
 		wdt_reset();
 
 		/* See if we have any communication waiting. */
-		x = uart_getch();
+		x = uart_getchar();
 		if (x >= 0) {
 			do_serial_port_char((unsigned char)x);
 			tm_last_command = get_time();
