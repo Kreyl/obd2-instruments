@@ -1,4 +1,4 @@
-/* can-obd2.c: OBD2 CAN interface for the VVVVroom motor controller. */
+/* obd2.c: OBD2 CAN interface for the VVVVroom motor controller. */
 /*
  * OBD2 interface and reporting.
  * This file implements automotive OBD2, reporting
@@ -12,14 +12,16 @@
  * It combines the OBD2 protocol code with an interface to CAN bus
  * drivers.  This code was previously combined with a MCP2515 CAN
  * controller driver in a single source file.  While that was an
- * awkward mix, it wass motivated by the lack of clean layering in
+ * awkward mix, it was motivated by the lack of clean layering in
  * CAN.  Using a chip with a different interface or structure of Rx
- * filters and masks propagates changes into the protocol level.  The
- * drivers now are in separate files, but must still understand OBD2
- * addressing.
+ * filters and masks propagates changes into the protocol level.
  *
- * We always configure to 500Kbps and start broadcasting, expecting that
- * other devices will be silently waiting to autobaud against our traffic.
+ * There are now multiple CAN controller drivers in separate files, but
+ * all are still are intertwined with OBD2 addressing.
+ *
+ * We default to 500Kbps.  In some configurations we start broadcasting,
+ * expecting that other devices will be silently waiting to autobaud
+ * against our traffic.
  *
  * References for understanding this code
  *  http://en.wikipedia.org/wiki/On-board_diagnostics
@@ -39,8 +41,9 @@
  * OBD specifies a 'funcitonal ID' of 0x7DF that acts as a broadcast
  * address, and physical addresses of 0x7E0-7EF.  0x7E0-0x7E7 are for
  * for tester-to-ECU communication, and 0x7E8-0x7EF are for ECU-to-tester.
- * A diag tool will broadcast on 0x7DF, and use the ID from the response
- * for subsequent frames with multi-frame messages.  We respond from 0x7E8.
+ * A diag tool will broadcast on 0x7DF, and use the ID computed from the
+ * response for subsequent frames with multi-frame messages.  We respond
+ * from 0x7E8, thus expect targeted frames at 0x7E0.
  *
  * Internal physical addresses are mostly arbitrary, and in-network
  * communication uses the already-known ID.  We use 0x420, and respond to
@@ -53,27 +56,21 @@
  * only provide the ACK to messages it is listening to.
  */
 static const char versionA[] =
-"can-obd2.c: $Id: can-bus.c 155 2011-03-31 00:08:47Z becker $ Copyright Donald Becker\n";
+"obd2.c: $Id: can-bus.c 155 2011-03-31 00:08:47Z becker $ Copyright Donald Becker\n";
 
+/* We need very few library routines. */
 #if defined(STM32)
-/* The STM32 doesn't need the awkward Harvard architecture hacks of the AVR. */
 #include <armduino.h>
-extern char *strcpy_P(char *dest, const char *src);
-
+extern void *memset(void *s, int c, long n);
 #elif defined(__AVR_ATmega168__)
 #define MEGA168
 #elif defined(__AVR_ATmega1280__)
 #define MEGA1280
 #endif
 
-/* We need very few library routines. */
-#if defined(STM32)
-extern void *memset(void *s, int c, long n);
-
-#else
+#if !defined(STM32)
 #include <stdlib.h>
 #include <string.h>
-
 #include <avr/io.h>
 #include <avr/pgmspace.h>
 #include <avr/interrupt.h>
@@ -102,6 +99,12 @@ extern void *memset(void *s, int c, long n);
 #include "vvvvroom.h"
 #include "can.h"
 
+/* An abstraction for getting the engine load value. */
+extern volatile uint16_t pwm_width;	/* EV controller "throttle plate" 0..511  */
+static inline uint8_t engine_load(void)
+{
+	return pwm_width >> 1;
+}
 
 /* We deduce our own clock from counter_1k. */
 uint16_t local_clock, tm_seconds;
@@ -119,8 +122,8 @@ struct CAN_command can_cmd;
 
 /* Our CAN ID for operational (non-diagnostic, higher priority) frames
  * and for OBD2 responses. */
-#define CAN_PHY_ADDR 0x420
-#define CAN_ECU_ID 0x7e8
+#define CAN_PHY_ADDR CAN_SID(0x420)
+#define CAN_ECU_ID CAN_SID(0x7e8)
 
 /* Internal state and structures. */
 uint8_t CAN_reset_done = 0;
@@ -257,9 +260,11 @@ uint8_t OBD2_respond(void)
 			can_cmd.dataB = 0;	/* with no second fuel system */
 			count = 4;
 			break;
-		case 0x04:	/* Calculated Engine load 0..255, we use amps. */
-			/* Percentage of available torque, not rated torque. */
-			can_cmd.dataA = pwm_width >> 1;
+		case 0x04:	/* Calculated Engine load 0..255. */
+			/* Percentage of instantaneous available torque, not rated torque.
+			 * On the QAR controller we report PWM percentage, although
+			 * amps is the best estimate of torque. */
+			can_cmd.dataA = engine_load();
 			count = 3;
 			break;
 		case 0x05:	/* Coolant temp A-40 -40C..+215C, we use heatsink temp. */
@@ -553,10 +558,6 @@ int8_t CAN_process_rx_frame(void)
 			VIN.msg_cnt = 0;
 			break;
 		}
-		if (can_verbose > 3) {
-			serprintf(PSTR("  CAN flow control %2x %d %d %d.\n\r"),
-					  can_cmd.cnt, can_cmd.mode, can_cmd.pid, can_cmd.dataA);
-		}
 	}
 	return 0;
 }
@@ -564,7 +565,7 @@ int8_t CAN_process_rx_frame(void)
 /* Reset and initialize the interface.
  * Synchronize if possible, but do not start reception.
  * Returns non-zero if the interface does not exist or is borked.
- * Call  to allow the 
+ * Call early to overlap any CAN reset with other device init.
  */
 int8_t CAN_init(void)
 {
@@ -573,10 +574,8 @@ int8_t CAN_init(void)
 	CAN_reset_done = CAN_enabled = 0;
 
 	/* This will be cleaned up after development stabilizes. */
-	if (CAN_reset_done == 0 && CAN_dev_init() != 0) {
-		serprintf(PSTR("CAN reset failed!\n"));
+	if (CAN_reset_done == 0 && CAN_dev_init() != 0)
 		return 1;
-	}
 	CAN_reset_done = 1;
 	return 0;
 }
