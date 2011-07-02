@@ -56,17 +56,17 @@ erase:
 	$(STLINK-DOWNLOAD) /dev/stlink debug reset erase=all
 
 qar-control.elf: vvvv-main.o stm32-devs.o stm32-adc.o pi-loop.o \
-  can-obd2.o $(CAN_O) serial.o motor-commands.o command-plus.o tach.o
+  obd2.o $(CAN_O) serial.o motor-commands.o command-plus.o tach.o
 	$(ARM-LD) $(LDFLAGS) -o $@ $^  $(LDEXTRAS)
 
 can-control.elf: can-control.o stm32-devs.o stm32-adc.o \
-  serial.o command-plus.o can-obd2.o $(CAN_O)
+  serial.o command-plus.o obd2.o $(CAN_O)
 	$(ARM-LD) $(LDFLAGS) -o $@ $^  $(LDEXTRAS)
 bx-can-control.elf: can-control.o stm32-devs.o stm32-adc.o \
-   serial.o command-plus.o can-obd2.o bxCAN.o
+   serial.o command-plus.o obd2.o bxCAN.o
 	$(ARM-LD) $(LDFLAGS) -o $@ $^ $(LDEXTRAS)
 mcp-can.elf: can-control.o stm32-devs.o stm32-adc.o \
-   serial.o command-plus.o can-obd2.o mcp2515.o
+   serial.o command-plus.o obd2.o mcp2515.o
 	$(ARM-LD) $(LDFLAGS) -o $@ $^ $(LDEXTRAS)
 
 can-control: can-control.bin
@@ -75,9 +75,9 @@ can-control: can-control.bin
 mcp-can: mcp-can.bin
 	$(STLINK-DOWNLOAD) /dev/stlink erase flash:w:$<
 
-vvvv-main.o stm32-devs.o stm32-adc.o can-obd2.o pi-loop.o tach.o: vvvvroom.h
+vvvv-main.o stm32-devs.o stm32-adc.o obd2.o pi-loop.o tach.o: vvvvroom.h
 command-plus.o: command.h
-can-control.o can-obd2.o mcp2515.o bxCAN.o: can.h
+can-control.o obd2.o mcp2515.o bxCAN.o: can.h
 
 clean:
 	rm -f *.o *.elf *.bin
