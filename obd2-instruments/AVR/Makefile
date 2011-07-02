@@ -28,6 +28,7 @@ else
   DONE=
   MCU?=atmega1280
   CFLAGS=-O2 -ffunction-sections -funsigned-char -funsigned-bitfields -fpack-struct -fshort-enums -Wall -Wstrict-prototypes -mmcu=$(MCU)
+  CFLAGS+=-I../common/
   # To generate assembler files e.g. .lst/.map/.hex pass an assembler option
   # CFLAGS+= -Wa,-adhlns=$(<:.c=.lst)
   ASFLAGS=-mmcu=$(MCU) -Wa,-mmcu=$(MCU),-gstabs
@@ -77,6 +78,8 @@ endif
 
 
 .phony:	all clean distclean program verify download tar
+
+VPATH=../common/
 
 all:	obd2-instruments.hex can-control.hex
 	$(DONE)
