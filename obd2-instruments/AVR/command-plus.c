@@ -22,7 +22,6 @@ static int strcmp(const char *s1, const char *s2);
 #if defined(__AVR_ATmega1280__)
 #define MEGA1280
 #endif
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -128,7 +127,7 @@ void do_serial_port_char(unsigned char c)
 		unsigned char i;
 		int param = -1;			/* We default to -1 with no parameter. */
 
-		for (i = 0; i < cmdpos - 1; i++) {
+		for (i = 0; i < cmdpos; i++) {
 			if (cmd[i] == ' ') {
 				/* Terminate keyword at this position, parse numeric value.
 				 * Note: we end up with a 0, not -1, for non-numeric text. */
