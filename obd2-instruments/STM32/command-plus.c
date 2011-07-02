@@ -7,7 +7,7 @@
  * The second is done with a similar table of function pointers.
  */
 static const char versionA[] =
-"command-plus: 12/20/2010 Copyright Donald Becker\n";
+"command-plus: 1/14/2011 Copyright Donald Becker\n";
 
 #if defined(STM32)
 #include <armduino.h>
@@ -50,6 +50,7 @@ int atoi(const char *c)
 	return res;
 }
 
+#if defined(STM32)
 static int strcmp(const char *s1, const char *s2)
 {
 	for(; *s1 == *s2; ++s1, ++s2)
@@ -65,6 +66,7 @@ void *memcpy(void *dest, const void *src, long count)
 	}
 	return dest;
 }
+#endif
 
 static void process_command(char *cmd, int val)
 {
