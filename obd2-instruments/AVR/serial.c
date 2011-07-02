@@ -1,14 +1,16 @@
 /* serial.c: UART queue support for small controllers.
  */
 
-#include <avr/io.h>
-#include <avr/pgmspace.h>
-#include <avr/interrupt.h>
-/* Using setbaud.h requires us to pre-define our speed. */
 #if ! defined(BAUD)
 #define BAUD 9600
 #endif
+
+#include <avr/io.h>
+#include <avr/interrupt.h>
+/* Using setbaud.h requires us to pre-define BAUD and F_CPU. */
+#if ! defined(F_CPU)
 #define F_CPU 16000000		/* 16MHz */
+#endif
 #include <util/setbaud.h>
 
 #if defined(IOM8)
@@ -22,12 +24,9 @@
 #elif
 #error No target AVR controller defined
 #endif
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 /* Set the size of the receive and transmit buffers.
- * These must be less than 255 bytes.
+ * The size must fit within the queue index range.
  * The transmit buffer should be able to buffer a whole line, but can
  * smaller at the cost of busy-waiting.
  * The receive buffer only needs to handle a simple command.
@@ -77,37 +76,36 @@
 
 typedef unsigned char q_index;
 
-/* The queue state structure for a single UART. */
-typedef struct {
-	unsigned char rxbuf[UART_RXBUF_SIZE];
-	unsigned char txbuf[UART_TXBUF_SIZE];
-	volatile q_index rxhead;
-	volatile q_index rxtail;
-	volatile q_index txhead;
-	volatile q_index txtail;
-} uart_fifo_type;
+/* Queue state structure for a single direction, two per UART. */
+struct uart_rx_fifo {
+	volatile q_index head;
+	volatile q_index tail;
+	unsigned char buf[UART_RXBUF_SIZE];
+} uart_rx;
+struct uart_tx_fifo {
+	volatile q_index head;
+	volatile q_index tail;
+	unsigned char buf[UART_TXBUF_SIZE];
+} uart_tx;
 
-uart_fifo_type uart0;
-
-/* The output buffer for uart_putstr(). */
-char uart_str[80];
 /* Public statistics for the serial port - interrupt counts. */
 volatile unsigned long serial_txbytes = 0;
 volatile unsigned long serial_rxbytes = 0;
 
-/* UART receive interrupt: just assume that a character has arrived. */
+/* UART receive interrupt: With the AVR we can just assume that a character
+ * has arrived. */
 ISR(SIG_USART0_RECV)
 {
 	unsigned char c;
 	q_index i;
 
 	c = UDR0;
-	i = uart0.rxhead + 1;
+	i = uart_rx.head + 1;
 	if (i >= UART_RXBUF_SIZE)
 		i = 0;
-	if (i != uart0.rxtail) {		/* Check that the queue is not full. */
-		uart0.rxbuf[uart0.rxhead] = c;
-		uart0.rxhead = i;
+	if (i != uart_rx.tail) {		/* Check that the queue is not full. */
+		uart_rx.buf[uart_rx.head] = c;
+		uart_rx.head = i;
 	}
 	serial_rxbytes++;
 }
@@ -120,11 +118,11 @@ ISR(SIG_USART0_DATA)
 {
 	q_index i;
 	
-	i = uart0.txtail;
-	if (i != uart0.txhead) {
-		UDR0 = uart0.txbuf[i++];
+	i = uart_tx.tail;
+	if (i != uart_tx.head) {
+		UDR0 = uart_tx.buf[i++];
 		if (i >= UART_TXBUF_SIZE) i = 0;
-		uart0.txtail = i;
+		uart_tx.tail = i;
 	} else {
 		/* Leave only the Rx interrupt enabled. */
 		UCSR0B = (1 << RXEN) | (1 << TXEN) | (1 << RXCIE);
@@ -140,12 +138,12 @@ int uart_getchar(void)
 	unsigned char c;
 	q_index i, j;
 
-	i = uart0.rxtail;
-	j = uart0.rxhead;
+	i = uart_rx.tail;
+	j = uart_rx.head;			/* Must be atomic. */
 	if (i != j) {
-		c = uart0.rxbuf[i++];
+		c = uart_rx.buf[i++];
 		if (i >= UART_RXBUF_SIZE) i = 0;
-		uart0.rxtail = i;		/* Must be atomic */
+		uart_rx.tail = i;		/* Must be atomic. */
 		return c;
 	}
 	return -1;
@@ -159,19 +157,19 @@ char uart_putchar(char c)
 {
 	q_index i, j;
 
-	i = uart0.txhead + 1;
+	i = uart_tx.head + 1;
 	if (i >= UART_TXBUF_SIZE) i = 0;
-	j = uart0.txtail;			/* Must be atomic */
+	j = uart_tx.tail;			/* Must be atomic. */
 	if (i == j)					/* Queue full, report failure. */
 		return -1;
-	uart0.txbuf[uart0.txhead] = c;
-	uart0.txhead = i;			/* Must be atomic */
+	uart_tx.buf[uart_tx.head] = c;
+	uart_tx.head = i;			/* Must be atomic. */
 	/* Enable TX buffer empty interrupt. */
 	UCSR0B = (1 << RXEN) | (1 << TXEN) | (1 << RXCIE) | (1 << UDRIE);
 	return 0;
 }
 
-/* Configure the UART registers.
+/* Configure the USART registers.
  * We set the UART to 9600,N,8,1 to match the Arduino, with the baud
  * rate set in the define above or overridden in the compile environment.
  * Note that this does not yet support UART1..UART3
@@ -180,7 +178,7 @@ void setup_uart(void)
 {
 	/* Re-initialize counts when called. */
 	serial_txbytes = serial_rxbytes = 0;
-	uart0.rxhead = uart0.txhead = uart0.rxtail = uart0.txtail = 0;
+	uart_rx.head = uart_tx.head = uart_rx.tail = uart_tx.tail = 0;
 
 	/* Use the vaules calculated in setbaud.h */
 	UBRR0L = UBRRL_VALUE;
