@@ -77,7 +77,7 @@ config_type PROGMEM default_config = {
 };
 struct throttle_params throttle;
 realtime_data_type rt_data;
-volatile unsigned counter_1k; 	/* 1KHz (976Hz to be exact) counter */
+volatile unsigned counter_1k; 	/* 1KHz (1 msec) counter */
 unsigned time_high;
 /* EV controller "throttle plate" 0..511  */
 volatile uint16_t pwm_width = 42;
@@ -210,9 +210,9 @@ static void help(uint16_t val)
 	return;
 }
 
-static void time(uint16_t val)
+static void cmd_time(uint16_t val)
 {
-	serprintf(PSTR("%5d msec\r\n"), get_time());
+	serprintf(PSTR("Uptime %5d msec\r\n"), get_time());
 	return;
 }
 
@@ -228,6 +228,18 @@ static void volts(uint16_t val)
 		serprintf(PSTR("AVR ADC%2d %4d %d.%3dV\r\n"),
 				  i, raw_adc[i], voltage / 1000, voltage % 1000);
 	}
+	return;
+}
+
+void cmd_init(uint16_t val)
+{
+	CAN_dev_init();
+	return;
+}
+
+void cmd_start(uint16_t val)
+{
+	CAN_dev_start();
 	return;
 }
 
@@ -273,11 +285,6 @@ static void can_stop(uint16_t val)
 	mcp2515_sleep(-1);	/* Could be CAN_dev_stop(); */
 }
 
-void mcp2515_init(uint16_t val)
-{
-	CAN_dev_init();
-	return;
-}
 void mcp2515_sleep(uint16_t val)
 {
 	CAN_CS_ENABLE;
@@ -308,11 +315,13 @@ void mcp2515_gppins(uint16_t val)
 
 void show_regs(uint16_t val)
 {
+	int i;
 	if (val != 0xFFFF) {
 		CAN_show_registers(val & 0xF0);
 		return;
 	}
-	CAN_show_registers(val);
+	for (i = 0; i < 0x80; i += 0x10)
+		CAN_show_registers(i);
 	return;
 }
 
@@ -335,7 +344,7 @@ void send_rpm_message(uint16_t val)
 	can_cmd.pid = 0x42;
 	can_cmd.dataA = val >> 8;
 	can_cmd.dataB = val;
-	can_cmd.id = 0x420;
+	can_cmd.id = CAN_SID(0x420);
 	CAN_dev_transmit();
 	return;
 }
@@ -345,23 +354,25 @@ struct cmd_var_entry const cmd_var_table[] = {
 	{"misc", &misc, 0,1023},
 	{"pwm", (uint16_t *)&pwm_width, 0, 1000},
 	{"qrpm", &qrpm, 0,0xFFFF},
+	{"verbose", (uint16_t *)&can_verbose, 0, 10},
 	{0, 0, 0, 0},
 };
 
 struct cmd_func_entry const cmd_func_table[] = {
 	{"heartbeat", can_heartbeat, 0, 0},
 	{"help", help, 0, 0},
-	{"init", mcp2515_init, 0, 0},
+	{"init", cmd_init, 0, 0},
 	{"leds", mcp2515_leds, 0, 0},
 	{"pins", mcp2515_gppins, 0, 0},
 	{"regs", show_regs, 0, 0},
+	{"reset", can_reset, 0, 0},
 	{"rpm", send_rpm_message, 0, 0},
 	{"sleep", mcp2515_sleep, 0, 0},
+	{"start", cmd_start, 0, 0},
 	{"status", mcp2515_status, 0, 0},
-	{"reset", can_reset, 0, 0},
 	{"stop", can_stop, 0, 0},
-	{"time", time, 0, 0},
-	{"verbose", set_verbose, 0, 10},
+	{"time", cmd_time, 0, 0},
+	{"v", set_verbose, 0, 10},
 	{"volts", volts, 0, 0xFFFF},
 	{0, 0, 0, 0},
 };
@@ -396,6 +407,7 @@ int main(void)
 
 	/* Initialize the timekeeping variables. */
 	tm_can_pkt = get_time();
+	serprintf(PSTR("> "));
 
 	/* Our operating loop is mostly non-time-critical code.
 	 * The interesting stuff happens in the interrupt handlers.
