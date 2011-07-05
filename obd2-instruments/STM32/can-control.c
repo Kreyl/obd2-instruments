@@ -285,7 +285,7 @@ static void help(uint16_t val)
 	return;
 }
 
-static void time(uint16_t val)
+static void cmd_time(uint16_t val)
 {
 	serprintf(PSTR("Uptime %5d msec\r\n"), get_time());
 	return;
@@ -358,6 +358,12 @@ static void can_stop(uint16_t val)
 	CAN_dev_stop();
 }
 
+static void cmd_init(uint16_t val)
+{
+	CAN_dev_init();
+	return;
+}
+
 #if 0
 void mcp2515_reset(uint16_t val)
 {
@@ -395,7 +401,7 @@ void mcp2515_reset(uint16_t val)
 
 void mcp2515_init(uint16_t val)
 {
-	CAN_setup();
+	CAN_dev_init();
 	return;
 }
 void mcp2515_sleep(uint16_t val)
@@ -456,7 +462,7 @@ void send_rpm_message(uint16_t val)
 	can_cmd.pid = 0x42;
 	can_cmd.dataA = val >> 8;
 	can_cmd.dataB = val;
-	can_cmd.id = 0x420;
+	can_cmd.id = CAN_SID(0x420);
 	CAN_dev_transmit();
 	return;
 }
@@ -472,8 +478,8 @@ struct cmd_var_entry const cmd_var_table[] = {
 struct cmd_func_entry const cmd_func_table[] = {
 	{"heartbeat", can_heartbeat, 0, 0},
 	{"help", help, 0, 0},
+	{"init", cmd_init, 0, 0},
 #if 0
-	{"init", mcp2515_init, 0, 0},
 	{"leds", mcp2515_leds, 0, 0},
 	{"pins", mcp2515_gppins, 0, 0},
 #endif
@@ -488,7 +494,7 @@ struct cmd_func_entry const cmd_func_table[] = {
 	{"reset", can_reset, 0, 0},
 	{"rpm", send_rpm_message, 0, 0},
 	{"stop", can_stop, 0, 0},
-	{"time", time, 0, 0},
+	{"time", cmd_time, 0, 0},
 	{"verbose", set_verbose, 0, 10},
 	{"volts", volts, 0, 0xFFFF},
 	{"zero", mosi_zero, 0, 0xFFFF},
