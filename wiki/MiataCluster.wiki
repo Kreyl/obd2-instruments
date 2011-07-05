@@ -12,17 +12,18 @@ We compiled this information as part of our EV Miata project.  We designed a mot
 = Details =
 
 
-Gagues to drive
- 1M Y/L	Tachometer  (current draw or motor speed)
- 2L B/L	Water temperature (heatsink temperature)
- 2B Y/R  Oil pressure (motor temperature or freewheel ratio)
- 1A  Y  Fuel level (battery charge level)
- 2J  B  gauge ground
+Gauges to drive 
+ || 1M | Y/L | Tachometer | current draw or motor speed ||
+ || 2L | B/L | Water temperature | heatsink temperature ||
+ || 2B || Y/R || Oil pressure || motor temperature or freewheel ratio
+ || 1A || Y || Fuel level || battery charge level ||
+ || 2J || B || gauge ground
 
 Indicator lights to drive, all switched to ground to turn on
-  Check Engine  1.4W
-  Charge	1.4W
-  OD off	1.4W
+
+  || Check Engine  || 1.4W
+  || Charge	 || 1.4W
+  || OD off	 || 1.4W
 
 Possible cluster outputs
   Speed sensor (from speedometer?) on 2F
