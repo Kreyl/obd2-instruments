@@ -55,7 +55,7 @@ static char buf[12];
  * digits. Leading zeros are included, overflow is truncated and the
  * string is not terminated.
  */
-void u32_to_uart(long val, int digits)
+void u32_to_uart(uint32_t val, int digits)
 {
 	char *str = buf + sizeof(buf) - 1;
 	*str-- = 0;
@@ -70,7 +70,7 @@ void u32_to_uart(long val, int digits)
 }
 
 /* Same thing in hex. */
-void longHex_to_uart(unsigned val, unsigned char digits)
+void uint_to_hex_uart(unsigned val, unsigned char digits)
 {
 	unsigned char nibble;
 	char *str = buf + sizeof(buf) - 1;
@@ -141,19 +141,21 @@ int serprintf(PGM_P format, ...)
 				break;
 			case 'x':
 			case 'X': {
-				serial_putch('0'); /* Do "%#x" rather than "%x" */
-				serial_putch(c);
+				if (j == 1) {		/* Do "%#x" rather than "%x" */
+					serial_putch('0');
+					serial_putch(c);		/* Match case 0x or 0X */
+				}
 #if 1
-				longHex_to_uart(j == LONG_SZ ? va_arg(args, long) :
-								va_arg(args, int), j);
+				uint_to_hex_uart(j == LONG_SZ ? va_arg(args, long) :
+								 va_arg(args, int), j);
 #else
 				if (j == 4) {
 					uint32_t val = va_arg(args, uint32_t);
-					longHex_to_uart(buf+4, val, 4);
-					longHex_to_uart(buf, val>>16, 4);
+					uint_to_hex_uart(buf+4, val, 4);
+					uint_to_hex_uart(buf, val>>16, 4);
 					buf[9] = 0;
 				} else {
-					longHex_to_uart(buf, va_arg(args, uint16_t), j);
+					uint_to_hex_uart(buf, va_arg(args, uint16_t), j);
 					buf[4] = 0;
 				}
 #endif
