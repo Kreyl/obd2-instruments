@@ -27,10 +27,7 @@ static const char versionA[] =
 #if defined(STM32)
 /* The STM32 doesn't need the awkward Harvard architecture hacks of the AVR. */
 #include <armduino.h>
-#include "can.h"
 extern void *memset(void *s, int c, long n);
-extern uint8_t OBD2_respond(void);
-
 #else
 #include <avr/io.h>
 #include <avr/pgmspace.h>
@@ -42,10 +39,10 @@ extern uint8_t OBD2_respond(void);
 #endif
 #endif
 
-extern struct CAN_command can_cmd;
-extern uint8_t CAN_reset_done;
-extern uint8_t CAN_enabled;
-extern uint8_t can_verbose;
+#include "can.h"
+
+extern int serprintf(const char *format, ...)
+	__attribute__ ((format(printf, 1, 2)));;
 
 /* Our CAN ID for operational (non-diagnostic, higher priority) frames. */
 #define CAN_PHY_ADDR 0x420
@@ -174,9 +171,10 @@ char inline SPI_Transmit(char data)
  */
 void SPI_transmit_array(const prog_uint8_t *data, uint8_t size)
 {
+#if defined(STM32)
 	int result;
 	CAN_CS_ENABLE;
-#if defined(STM32)
+#if 0
 	/* A better sequential transmit routine for the STM32, which has
 	 * both Tx-empty and Rx-filled status bits.
 	 * It has a termination bug.  Better, it should be rewritten for DMA.
@@ -206,6 +204,13 @@ void SPI_transmit_array(const prog_uint8_t *data, uint8_t size)
 	} while (--size != 0);
 #endif
 	CAN_CS_DISABLE;
+#else  /* AVR */
+	CAN_CS_ENABLE;
+	do {
+		SPI_Transmit(pgm_read_byte(data++));
+	} while (--size != 0);
+	CAN_CS_DISABLE;
+#endif
 }
 
 /* Initialize the SPI interface.
@@ -252,6 +257,7 @@ uint8_t CAN_dev_init(void)
 	}
 	CAN_CS_DISABLE;
 	SPDR;			/* Clear data register from init. */
+	CAN_enabled = 0;
 	CAN_reset_done = 1;
 	memset(txbuf, 0, sizeof txbuf);
 	return i;
