@@ -15,7 +15,7 @@ Gauges to drive
 
 || *Connector* || *Color* || *Gauge* || *EV Use* ||
 || 1M || Y/L || Tachometer || current draw or motor speed ||
-|| 2L | B/L || Water temperature || heatsink temperature ||
+|| 2L || B/L || Water temperature || heatsink temperature ||
 || 2B || Y/R || Oil pressure || motor temperature or freewheel ratio ||
 || 1A || Y || Fuel level || battery charge level ||
 || 2J || B || gauge ground||
