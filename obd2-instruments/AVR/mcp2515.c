@@ -27,6 +27,7 @@ static const char versionA[] =
 #if defined(STM32)
 /* The STM32 doesn't need the awkward Harvard architecture hacks of the AVR. */
 #include <armduino.h>
+extern void *memset(void *s, int c, long n);
 #else
 #include <avr/io.h>
 #include <avr/pgmspace.h>
@@ -42,14 +43,6 @@ static const char versionA[] =
 
 extern int serprintf(const char *format, ...)
 	__attribute__ ((format(printf, 1, 2)));;
-
-extern void *memset(void *s, int c, size_t n);
-
-
-extern struct CAN_command can_cmd;
-extern uint8_t CAN_reset_done;
-extern uint8_t CAN_enabled;
-extern uint8_t can_verbose;
 
 /* Our CAN ID for operational (non-diagnostic, higher priority) frames. */
 #define CAN_PHY_ADDR 0x420
@@ -211,7 +204,7 @@ void SPI_transmit_array(const prog_uint8_t *data, uint8_t size)
 	} while (--size != 0);
 #endif
 	CAN_CS_DISABLE;
-#else
+#else  /* AVR */
 	CAN_CS_ENABLE;
 	do {
 		SPI_Transmit(pgm_read_byte(data++));
@@ -264,6 +257,7 @@ uint8_t CAN_dev_init(void)
 	}
 	CAN_CS_DISABLE;
 	SPDR;			/* Clear data register from init. */
+	CAN_enabled = 0;
 	CAN_reset_done = 1;
 	memset(txbuf, 0, sizeof txbuf);
 	return i;
@@ -344,6 +338,19 @@ uint8_t CAN_dev_start(void)
 	CAN_CS_DISABLE;
 #endif
 
+	return 0;
+}
+
+/* Reset the device, leaving it offline and ready to be initialized. */
+uint8_t CAN_dev_stop(void)
+{
+	CAN_reset_done = 0;
+
+	CAN_CS_ENABLE;
+	SPI_Transmit(MCP_Write);
+	SPI_Transmit(0x0F);					/* CANCTRL */
+	SPI_Transmit(0x20);					/* Set sleep mode. */
+	CAN_CS_DISABLE;
 	return 0;
 }
 
