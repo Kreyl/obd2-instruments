@@ -75,11 +75,11 @@ static void process_command(char *cmd, int val)
 	for (i = 0; cmd_var_table[i].name; i++) {
 		if ( ! strcmp(cmd, cmd_var_table[i].name)) {
 			if (val == -1)
-				serprintf("%s is %d.\n", cmd, *cmd_var_table[i].ptr);
+				serprintf(PSTR("%s is %d.\n"), cmd, *cmd_var_table[i].ptr);
 			else if (cmd_var_table[i].min <= val && val <= cmd_var_table[i].max)
 				*cmd_var_table[i].ptr = val;
 			else
-				serprintf("Value %d out of range for variable '%s'.\n",
+				serprintf(PSTR("Value %d out of range for variable '%s'.\n"),
 						  val, cmd);
 			return;
 		}
@@ -105,12 +105,12 @@ void do_serial_port_char(unsigned char c)
 	/* If the character is not a CR we just echo it back and tack it onto the
 	 * command line.  No support for line editing or even backspace. */
 	if (c != 0x0d) {
-		serprintf("%c", c);
+		serprintf(PSTR("%c"), c);
 		if (c == '\b') {
 			if (cmdpos > 0)
 				cmd[--cmdpos] = 0;
 			else
-				serprintf(" ");
+				serprintf(PSTR(" "));
 		} else if (cmdpos < (sizeof(cmd) - 1)) {
 			cmd[cmdpos++] = c;
 			cmd[cmdpos] = 0;
