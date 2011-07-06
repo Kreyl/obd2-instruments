@@ -27,10 +27,12 @@ static const char versionA[] =
 #if defined(STM32)
 /* The STM32 doesn't need the awkward Harvard architecture hacks of the AVR. */
 #include <armduino.h>
+extern void *memset(void *s, int c, long n);
 #else
 #include <avr/io.h>
 #include <avr/pgmspace.h>
 #include <avr/interrupt.h>
+#include <string.h>
 #if defined(COUGAR)
 /* Tweaks to work with the Cougar firmware. */
 #include "cougar-export.h"
@@ -40,7 +42,6 @@ static const char versionA[] =
 
 #include "can.h"
 
-extern void *memset(void *s, int c, size_t n);
 extern int serprintf(const char *format, ...)
 	__attribute__ ((format(printf, 1, 2)));;
 
@@ -171,46 +172,42 @@ char inline SPI_Transmit(char data)
  */
 void SPI_transmit_array(const prog_uint8_t *data, uint8_t size)
 {
-#if defined(STM32)
-	int result;
 	CAN_CS_ENABLE;
-#if 0
+#if defined(STM32) && defined(SPI_OVERLAP_CHECK)
 	/* A better sequential transmit routine for the STM32, which has
 	 * both Tx-empty and Rx-filled status bits.
 	 * It has a termination bug.  Better, it should be rewritten for DMA.
 	 */
 	SPDR = *data++;
 	while (--size > 0) {
+		int result;
 		int i = 0;
 		while ( ! (SPSR & SPI_TXE) && ++i > 5)
 			;
 		SPDR = *data++;
 		while ( ! (SPSR & SPI_RXNE) && ++i > 5)
 			;
-		result = SPDR;
+		(volatile)SPDR;
 		if (i > 2)
 		serprintf("Exceeded iteration check %d with %d bytes left.\n",
 				  i, size);
 	}
 	while ( ! (SPSR & SPI_RXNE))
 		;
-	result = SPDR;
-#else
+	SPDR;
+#elif defined(STM32) && defined(SPI_OVERLAP)
 	do {
 		SPDR = data;
 		while ( ! (SPSR & TXE))
 			;
 		SPI_Transmit(pgm_read_byte(data++));
 	} while (--size != 0);
-#endif
-	CAN_CS_DISABLE;
-#else  /* AVR */
-	CAN_CS_ENABLE;
+#else  /* Simple loop */
 	do {
 		SPI_Transmit(pgm_read_byte(data++));
 	} while (--size != 0);
-	CAN_CS_DISABLE;
 #endif
+	CAN_CS_DISABLE;
 }
 
 /* Initialize the SPI interface.
