@@ -27,7 +27,6 @@ static const char versionA[] =
 #if defined(STM32)
 /* The STM32 doesn't need the awkward Harvard architecture hacks of the AVR. */
 #include <armduino.h>
-extern void *memset(void *s, int c, long n);
 #else
 #include <avr/io.h>
 #include <avr/pgmspace.h>
@@ -41,6 +40,7 @@ extern void *memset(void *s, int c, long n);
 
 #include "can.h"
 
+extern void *memset(void *s, int c, size_t n);
 extern int serprintf(const char *format, ...)
 	__attribute__ ((format(printf, 1, 2)));;
 
