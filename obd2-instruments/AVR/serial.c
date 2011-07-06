@@ -110,6 +110,29 @@ ISR(SIG_USART0_RECV)
 	serial_rxbytes++;
 }
 
+#if defined(ALT_USART)
+/* Second/alternate UART receive interrupt.  We can accept input from two
+ * serial ports.  This allows either the built-in USB connection and a
+ * bluetooth module.  We assume it's not simultaneous and thus don't need to
+ * lock.  A true race would be vanishingly rare with human input.
+ */
+ISR(SIG_USART1_RECV)
+{
+	unsigned char c;
+	q_index i;
+
+	c = UDR1;
+	i = uart_rx.head + 1;
+	if (i >= UART_RXBUF_SIZE)
+		i = 0;
+	if (i != uart_rx.tail) {		/* Check that the queue is not full. */
+		uart_rx.buf[uart_rx.head] = c;
+		uart_rx.head = i;
+	}
+	serial_rxbytes++;
+}
+#endif
+
 /* UART Data Sent interrupt
  * Send the next character in the queue, or disable the Tx interrupt if
  * the queue has drained.
@@ -188,7 +211,7 @@ void setup_uart(void)
 	 * the high bit, URSEL, to select which is written.
 	 * We always use 8N1 to communicate.
 	 */
-	UCSR0C = PARITY_NONE | BITS_8_1 | (1 << URSEL);
+	UCSRC = PARITY_NONE | BITS_8_1 | (1 << URSEL);
 #else
 	UCSR0C = PARITY_NONE | BITS_8_1;
 #endif
@@ -196,6 +219,14 @@ void setup_uart(void)
 	 * Nothing will happen unless interrupts are globally enabled.
 	 */
 	UCSR0B = (1 << RXEN) | (1 << TXEN) | (1 << RXCIE);
+
+#if defined(ALT_USART)
+	UBRR1L = UBRRL_VALUE;
+	UBRR1H = UBRRH_VALUE;
+	UCSR1C = PARITY_NONE | BITS_8_1;
+	UCSR1B = (1 << RXEN) | (1 << TXEN) | (1 << RXCIE);
+	{ volatile char foo = UDR1;}
+#endif
 
 	return;
 }

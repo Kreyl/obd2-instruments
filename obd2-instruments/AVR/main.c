@@ -516,6 +516,8 @@ void setup_io_ports(void)
 	 * Set the other output pins on PB to high / weak pullups. */
 	PORTB = 0xe0;				/* Set PWM outputs initially high. */
 	DDRB = PB_LED | 0xe0;
+	/* Enable UART1 Tx (PD3) as an output. */
+	DDRD = 0x08;
 	/* Enable the timer 3 OCxA/B/C and UART0 Tx (PE1) pins as outputs. */
 	PORTE = 0x3A;
 	DDRE = 0x3A;
