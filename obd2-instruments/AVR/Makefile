@@ -29,6 +29,7 @@ else
   MCU?=atmega1280
   CFLAGS=-O2 -ffunction-sections -funsigned-char -funsigned-bitfields -fpack-struct -fshort-enums -Wall -Wstrict-prototypes -mmcu=$(MCU)
   CFLAGS+=-I../common/
+  CFLAGS+=-DALT_USART=1
   # To generate assembler files e.g. .lst/.map/.hex pass an assembler option
   # CFLAGS+= -Wa,-adhlns=$(<:.c=.lst)
   ASFLAGS=-mmcu=$(MCU) -Wa,-mmcu=$(MCU),-gstabs
