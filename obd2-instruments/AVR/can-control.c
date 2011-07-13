@@ -101,6 +101,10 @@ volatile uint16_t clock_1msec;
 volatile uint16_t clock_high;		/* If we ever need more than 65K seconds. */
 ISR(SIG_INPUT_CAPTURE1)
 {
+	static int phase = 0;
+	if (++phase < 10)
+		return;
+	phase = 0;
 	clock_1msec++;
 	if (clock_1msec == 0) {
 		clock_high++;
@@ -210,6 +214,17 @@ static void help(uint16_t val)
 	return;
 }
 
+static void cmd_vars(uint16_t val)
+{
+	int i;
+	serprintf(PSTR("Variable  Value\n"));
+	for (i = 0; cmd_var_table[i].name; i++) {
+		serprintf(PSTR(" %s = %d\n"),
+				  cmd_var_table[i].name, *cmd_var_table[i].ptr);
+	}
+	return;
+}
+
 static void cmd_time(uint16_t val)
 {
 	serprintf(PSTR("Uptime %5d msec\r\n"), get_time());
@@ -285,6 +300,10 @@ static void can_stop(uint16_t val)
 	mcp2515_sleep(-1);	/* Could be CAN_dev_stop(); */
 }
 
+/* Named 'sleep', because it defaults to setting the chip to sleep mode.
+ * It may be used for more general mode setting.
+ * Use 'sleep 64' to set loopback mode, or 'sleep 96' for listen-only mode.
+ */
 void mcp2515_sleep(uint16_t val)
 {
 	CAN_CS_ENABLE;
@@ -339,11 +358,15 @@ void can_heartbeat(uint16_t val)
 /* Send a set-RPM message to the motor controller. */
 void send_rpm_message(uint16_t val)
 {
+	if (val > (6250*4))
+		val = 0;
 	can_cmd.cnt = 0x04;
 	can_cmd.mode = 0x10;
 	can_cmd.pid = 0x42;
 	can_cmd.dataA = val >> 8;
 	can_cmd.dataB = val;
+	can_cmd.dataC = clock_1msec >> 8;
+	can_cmd.dataD = clock_1msec;
 	can_cmd.id = CAN_SID(0x420);
 	CAN_dev_transmit();
 	return;
@@ -373,6 +396,7 @@ struct cmd_func_entry const cmd_func_table[] = {
 	{"stop", can_stop, 0, 0},
 	{"time", cmd_time, 0, 0},
 	{"v", set_verbose, 0, 10},
+	{"vars", cmd_vars, 0, 10},
 	{"volts", volts, 0, 0xFFFF},
 	{0, 0, 0, 0},
 };
