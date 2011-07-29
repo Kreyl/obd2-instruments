@@ -1,0 +1,15 @@
+This directory contains the source code for PIC microcontrollers.
+
+The original target is the 'Revolt-LCD' AKA CougarLCD.  This is a
+purpose built project that displays the serial output from the
+OpenRevolt EV motor controller on a two line LCD display.  The hardware
+is based on the PIC18F2480 processor, with serial, analog and CAN I/O.
+The firmware is written in ASM, with no support for CAN.
+
+Compile environment
+
+The only universally available PIC compiler/environment is SDCC, thus
+that is the primary target environment.
+
+To build the firmware you'll need the following packages
+apt-get install sdcc
