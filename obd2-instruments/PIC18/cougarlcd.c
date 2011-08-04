@@ -17,7 +17,7 @@
 */
 
 #include <stdint.h>
-#include "pic18fregs.h"
+#include <pic18fregs.h>
 
 /* I/O pin assignments. */
 #define SW1 (PORTBbits.RB0_PORTB)
@@ -53,7 +53,10 @@ code char at __CONFIG6H conf6h = 0xFF; /* ToDo:verify */
 code char at __CONFIG7L conf7l = _EBTR0_OFF_7L & _EBTR1_OFF_7L;
 
 #pragma std_sdcc99 
+
 #pragma stack 0x200 64
+#if 0							/* We don't need to modify the stack */
+#endif
 
 /* Instructions that should be in a header file. */
 #define swapf(nibblepair)  { __asm SWAPF _##nibblepair , W __endasm;}
@@ -72,15 +75,16 @@ typedef union uint24_un {
 	};
 } uint24_t;
 
+#if 0
 /* Constants used at run time. */
-static const uint8_t MT_Max= 200; /* max motor temp for error LED */
-static const uint8_t CT_Max= 167; /* max controller temp for error LED */
-static const uint8_t BT_Max= 125; /* max battery temp for error LED */
+static const uint8_t MT_Max = 200; /* max motor temp for error LED */
+static const uint8_t CT_Max = 167; /* max controller temp for error LED */
+static const uint8_t BT_Max = 125; /* max battery temp for error LED */
 /* Traction battery capacity in Amp/seconds (only high/mid byte of 24-bit) */
 static const uint8_t bcapacityM = 0x5E;
 static const uint8_t bcapacityH = 0x06;
 static const uint8_t pmile = 32;
-static const char PWM_Max= 0xFF;
+static const char PWM_Max = 0xFF;
 static const char Sysval = 0x80; /* ToDo: configure as bitmap */
 static const uint8_t ALRM_lim = 21; /* Percentage SOC where alarm is tripped */
 /* Length of Profile 1 message that establishes offset to access Profile 2 */
@@ -101,16 +105,43 @@ static const char min_cAmp = 1;
  /* Update rate for displayed information.
   * 1= same as old software. 50=updates once per second */
 static const uint8_t D_refresh = 1;
+#else
+/* Constants used at run time. */
+#define MT_Max  200 /* max motor temp for error LED */
+#define CT_Max  167 /* max controller temp for error LED */
+#define BT_Max  125 /* max battery temp for error LED */
+#define bcapacityM  0x5E
+#define bcapacityH  0x06
+#define pmile  32
+#define PWM_Max  0xFF
+#define Sysval  0x80 /* ToDo: configure as bitmap */
+#define ALRM_lim  21 /* Percentage SOC where alarm is tripped */
+/* Length of Profile 1 message that establishes offset to access Profile 2 */
+#define PF2_Offset  26
 
-
-/* Calculate the moving average.
- * Input passed in tempH/L*/
+/* Adjustment for pack voltage.  This also corrects for minor gain
+ * transfer error in HCNR201. Value=correction x 10 */
+/* Adjustment for accessory voltage: compensate for diode drop of D1.
+ * Value=correction x 100 */
+#define Vpack_trim 0
+#define Vacc_trim  70
+/* Scale for motor amps and battery amps from serial message.
+ * Value/16= scale. Value of 16 is 1:1, 20 is 1.25:1,etc */
+#define sAmp_scale  16
+/* Battery amp charge efficiency. 16=100%, 15=94%, 14=87.5%, 13=81%, 12=75% */
+#define cEfficiency  15
+/* Charge amp level where cTime stops incrementing & mode LED stops blinking */
+#define min_cAmp  1
+ /* Update rate for displayed information.
+  * 1= same as old software. 50=updates once per second */
+#define D_refresh  1
+#endif
 
 static void INIT_LCD(void);
 static void SECOND_LINE(void);
-static void COMMAND(uint8_t cmd);
+static void COMMAND(uint8_t cmd) __wparam;
 static void COMMAND8(uint8_t command) __wparam;
-static void DISPLAY(char c)  __naked;
+static void DISPLAY(char c) __wparam;
 static void A2DLoop(void);
 static void A2DAVG(void);
 static void Hysteresis(void);
@@ -133,7 +164,7 @@ static void TX_Mode(void);
 static uint8_t F2C(uint8_t fahrenheit) __wparam;
 static void Capstore(void);
 static void EEsave(void);
-static uint8_t EERead(uint8_t index);
+static uint8_t EERead(uint8_t index) __wparam;
 
 /* Calculate the moving average, using AVG_FACTOR as the decay period. */
 static uint16_t ADC_average(uint16_t running_avg, uint8_t avg_factor);
@@ -444,7 +475,32 @@ static void main(void) __interrupt(0) __naked
 	while ((captemp -= 100) > 0)
 		CNT++;
 	pdiv = CNT;
-	/* Missing code. */
+
+    /* Determine 20% capacity values for capacityH/M using divisors */
+	CNT = 0;
+	captempH = bcapacityH;
+	captemp = bcapacityM<<8;		/* Should be a 24bit copy w/ low byte 0 */
+	do {
+		captemp -= pdiv;				/* Missing propagate borrow captempH */
+	} while (++CNT < 80);
+	pct20 = (captempH<<8) + (captemp>>8);
+
+	/* Enable timer 0 */
+	T0CONbits.TMR0ON = 1;
+
+    /* Test for Fuel Gauge calibration request */
+	if (SW2) {
+		T0CONbits.TMR0ON = 0;	/* Stop timer, even though just started */
+		INTCONbits.TMR0IF = 0;	/* Clear timer0 interrupt flag */
+		capacityH = pct20>>8;	/* capacity24bits = pct20<<8; */
+		capacity = pct20<<8;
+		Messnum = 0;			/* Pointless, zeroed above. */
+		while (SW2)				/* Wait for pushbutton release. */
+			;
+	}
+
+	OffsetH = Offset = 0;
+	COMMAND(HOME);
 
 	ADCON0 = 0x11;				/* ADC4, battery temperature */
 	ADCON0bits.GO_DONE = 1;
@@ -706,7 +762,7 @@ static void SECOND_LINE(void)
 /* Executes a command in the W reg to the LCD Module.
  * Precondition: module set to 4 bit mode.
  */
-static void COMMAND(uint8_t cmd)
+static void COMMAND(uint8_t cmd) __wparam
 {
 	RS = 0;		 /* Instruction/data select = 0 */
 	LCDtemp = cmd;
@@ -744,7 +800,7 @@ static void COMMAND8(uint8_t command)  __wparam
 	RS = 1;						/* Instruction/data select = 1 */
 }
 
-static void DISPLAY(char c) __naked  __wparam
+static void DISPLAY(char c) __wparam
 {
 	RS = 1;						/* Instruction/data select to data. */
 	LCDtemp = c;
@@ -1173,16 +1229,17 @@ static void TX_Mode(void)
 	return;
 }
 
+#define Arg2L  *((uint8_t *)&Arg2)
 /* Convert Fahrenheit to Centigrade uhm Celsius. */
 static uint8_t F2C(uint8_t fahrenheit) __wparam
 {
 	LZstat.NegTemp = 0;
-	Arg2 = fahrenheit;
-	if (Arg2 < 32) {
-		Arg2 = 32 - Arg2;
+	Arg2L = fahrenheit;
+	if (Arg2L < 32) {
+		Arg2L = 32 - Arg2L;
 		LZstat.NegTemp = 1;
 	} else
-		Arg2 -= 32;
+		Arg2L -= 32;
 	Fracmult(9);
 	return RES0;
 }
@@ -1220,7 +1277,7 @@ static void EEsave(void)
     EECON1bits.WREN = 0;
 }
 
-static uint8_t EERead(uint8_t index)
+static uint8_t EERead(uint8_t index) __wparam
 {
     EEADR = index;
     EECON1bits.CFGS = 0;
@@ -1232,7 +1289,7 @@ static uint8_t EERead(uint8_t index)
 
 /*
  * Local variables:
- *  compile-command: "sdcc -c cougarlcd.c -mpic16 -p18f2480 --pno-banksel"
+ *  compile-command: "sdcc cougarlcd.c -mpic16 -p18f2480 --pno-banksel --fommit-frame-pointer --optimize-df --denable-peeps --no-crt"
  *  c-indent-level: 4
  *  c-basic-offset: 4
  *  tab-width: 4
