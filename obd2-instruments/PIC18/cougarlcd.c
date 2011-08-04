@@ -76,14 +76,28 @@ typedef union uint24_un {
 static const uint8_t MT_Max= 200; /* max motor temp for error LED */
 static const uint8_t CT_Max= 167; /* max controller temp for error LED */
 static const uint8_t BT_Max= 125; /* max battery temp for error LED */
-
-static const char PWM_Max= 0xFF;
-static const char Sysval = 0x80;
 /* Traction battery capacity in Amp/seconds (only high/mid byte of 24-bit) */
 static const uint8_t bcapacityM = 0x5E;
 static const uint8_t bcapacityH = 0x06;
 static const uint8_t pmile = 32;
+static const char PWM_Max= 0xFF;
+static const char Sysval = 0x80; /* ToDo: configure as bitmap */
+static const char ALRM_lim = 21; /* Percentage SOC where alarm is tripped */
+/* Length of Profile 1 message that establishes offset to access Profile 2 */
+static const char PF2_Offset = 26;
 
+/* Adjustment for pack voltage.  This also corrects for minor gain
+ * transfer error in HCNR201. Value=correction x 10 */
+/* Adjustment for accessory voltage: compensate for diode drop of D1.
+ * Value=correction x 100 */
+const int8_t Vpack_trim = 0, Vacc_trim = 70;
+/* Scale for motor amps and battery amps from serial message.
+ * Value/16= scale. Value of 16 is 1:1, 20 is 1.25:1,etc */
+static const char sAmp_scale = 16;
+/* Battery amp charge efficiency. 16=100%, 15=94%, 14=87.5%, 13=81%, 12=75% */
+static const char cEfficiency = 15;
+/* Charge amp level where cTime stops incrementing & mode LED stops blinking */
+static const char min_cAmp = 1;
  /* Update rate for displayed information.
   * 1= same as old software. 50=updates once per second */
 static const uint8_t D_refresh = 1;
@@ -102,21 +116,21 @@ static void A2DAVG(void);
 static void Hysteresis(void);
 static void RXconvrt(void);
 static void mAmp_stat(void);
-static void MDELAY(uint8_t microseconds);
-static void MS_DELAY(char tens_of_milliseconds);
+static void MDELAY(uint8_t microseconds) __wparam;
+static void MS_DELAY(char tens_of_milliseconds) __wparam;
 static void Hex2BCD(void);
 static void BCD2Hex(void);
-static void Fracmult(uint8_t fraction4_4);		/* Call-return in Arg2 */
+static void Fracmult(uint8_t fraction4_4)  __wparam;/* Call-return in Arg2 */
 static char GetChar(void);
 static char GetTemp(void);
 static char GetTX(void);
 static void SOC_Calc(void);
 static void Range(void);
-static void CapTempAdj(void);
+static uint8_t CapTempAdj(void);
 static char Zerosupress(void);
 static void Button(void);
 static void TX_Mode(void);
-static uint8_t F2C(uint8_t fahrenheit);
+static uint8_t F2C(uint8_t fahrenheit) __wparam;
 static void Capstore(void);
 static void EEsave(void);
 static uint8_t EERead(uint8_t index);
@@ -196,12 +210,6 @@ union LZstat_type {				/* System status flags */
 } LZstat;
 uint8_t C_hours, C_minutes, CM_Delay, RF_Count;
 
-
-/* Adjustment for pack voltage also corrects for minor gain transfer error
- * in HCNR201. Value=correction x 10 */
-/* Adjustment for accessory voltage: compensate for diode drop of D1.
- * Value=correction x 100 */
-const int8_t Vpack_trim = 0, Vacc_trim = 70;
 
 /* High priority interrupt service routine used for serial port receive
  * from controller.  This is hard-coded to recognize the Cougar "real time
@@ -327,15 +335,16 @@ static void LOW_ISR() __interrupt(2)
 static void main(void) __interrupt(0) __naked
 {
 	/* Initialize ports. */
+	/* Select the external OSC1 8MHz crystal. */
 	OSCCON = 0x74;
 	PORTC = 0;
 	PORTA = 0;
 	PORTB = 0;
-	SSPCON1bits.SSPEN = 0;
-	TRISB = 0x0F;
-	TRISC = 0x80;
-	TRISA = 0x3F;
-	/* Set the ADC to Vdd/Vss reference, AN0..AN5 as analog inputs. */
+	SSPCON1bits.SSPEN = 0;		/* Disable serial port */
+	TRISB = 0x0F;				/* Upper 4 bits LCD control.  B0 pushbutton */
+	TRISC = 0x80;				/* Serial port (B7,B6) LED drive, LCD select */
+	TRISA = 0x3F;				/* Analog and pushbutton inputs */
+	/* Set the ADC to Vdd/Vss reference, AN0..AN5 as anal og inputs. */
 	ADCON1 = 0x0A;
 	/* Initialize the USART */
 	BAUDCON = 0;				/* Async 8 bit mode. */
@@ -572,7 +581,7 @@ uint8_t Peukert_1_05_tbl[] = {
  };
 #endif
 
-uint8_t Temp_Table[] = {
+uint8_t Temp_Table[45*8+1] = {
 	0x05,0x07,0x09,0x0B,0x0D,0x0F,0x10,0x12,
 	0x14,0x16,0x17,0x19,0x1A,0x1C,0x1D,0x1E,
 	0x20,0x21,0x23,0x24,0x25,0x27,0x28,0x29,
@@ -734,7 +743,7 @@ static void A2DLoop(void)
 			avg = 0;
 	/* Hysteresis routine. */
 	temp = Volt;
-	Hysteresis();
+	Hysteresis();	/* '0' passed in W, but never used. */
 	Volt = avg;
 	/* Use the data from the motor controller if set. */
 	if (Sys_Config.bAmpSource) {
@@ -767,7 +776,7 @@ static void A2DLoop(void)
 		if (avg >= 2) {
 			/* Hysteresis routine. */
 			temp = bAmp;
-			Hysteresis();
+			Hysteresis();	/* '2' passed in W, but never used. */
 			bAmp = avg;
 		}
 #if defined(USE_LEM_HASS)
@@ -832,14 +841,19 @@ static void A2DAVG(void)
 	temp = avg - (temp>>4) + ADRESH;
 }
 
-/* Hysteresis for value in TEMP, based on DEADBAND.
+/* Hysteresis for value in TEMP and AVG, based on DEADBAND.
  * Implemented in negative (decreasing) direction only.
  * Result return in AVG 
+ * Bug: Some code assumes that DEADBAND is passed in W, but it is
+ * really a hard-coded constant.
  */
+static int16_t RES23;
 static void Hysteresis(void)
 {
-	/* ToDo */
-	avg = temp;
+	if ((RES23 = temp - avg) < 0)
+		return;
+    if (RES23 > 2)				 
+		avg = temp;
 	return;
 }
 
@@ -849,12 +863,65 @@ static void RXconvrt(void)
 	if (LZstat.CommErr)
 		return;
 	INTCONbits.GIE = 0;			/* Disable interrupts globally. */
+	Dec1 = CHAR1;
+	Dec2 = CHAR2;
+	Dec3 = CHAR3;
+	BCD2Hex();
+	Arg2 = Hex;
+	Fracmult(sAmp_scale);
+	mAmp =  RES0 + RES1<<8;
+	if (Sys_Config.DisplayMode) {
+		mAmp_stat();
+	}
+	Dec1 = CHAR4;
+	Dec2 = CHAR5;
+	Dec3 = CHAR6;
+	BCD2Hex();
+	temp = cTemp;
+	cTemp = Hex;
 
+	Dec1 = CHAR7;
+	Dec2 = CHAR8;
+	Dec3 = CHAR9;
+	BCD2Hex();
+	Arg2 = Hex;
+	Fracmult(sAmp_scale);
+	bcAmp = RES0 + RES1<<8;
 	INTCONbits.GIE = 1;			/* Re-enable interrupts. */
-}
-static void mAmp_stat(void);
 
-static void MDELAY(uint8_t microseconds)
+	avg = cTemp>>2;
+	Hysteresis();				/* Bug: '2' passed in W, but never used. */
+	cTemp = avg;
+	/* Loop up in Temp_Table. */
+	Temp_ptr = cTemp + 161;
+	cTemp = GetTemp();
+}
+
+/* A routine called during display mode "auto1".
+ * It looks for low motor amps (under 5) and sets flag & display
+ * offset & message counter.
+ * It is called with the mAmp value in RES1/RES0.
+ */
+
+static void mAmp_stat(void)
+{
+	if (((RES1<<8) + RES0) - 5 < 0) {
+		if (LZstat.mtrAmpsLow == 0) {
+			LZstat.mtrAmpsLow = 0;
+			LZstat.TermCount = 0;
+			Messnum = Offset = Disp_count = 0;
+		}
+	} else if (LZstat.TermCount) {
+		LZstat.mtrAmpsLow = 1;
+	} else {
+		Offset = 18;
+		Messnum = 1;
+		LZstat.TermCount = 0;
+	}
+	return;
+}
+
+static void MDELAY(uint8_t microseconds) __wparam
 {
 	for (CNT = microseconds>>1; CNT; --CNT)
 		Nop();
@@ -862,7 +929,7 @@ static void MDELAY(uint8_t microseconds)
 }
 
 /* Sleazy software delay that should embarrass the author. */
-static void MS_DELAY(char tens_of_milliseconds)
+static void MS_DELAY(char tens_of_milliseconds) __wparam
 {
 	for (CNT = tens_of_milliseconds; CNT; --CNT)
 		for (CNT3 = 40; CNT3; --CNT3)
@@ -910,13 +977,23 @@ static void Hex2BCD(void)
 	Dig4 += 0x30;
 	return;
 }
-static void BCD2Hex(void);
+
+static void BCD2Hex(void)
+{
+	/* Sleazy: Assume that these are ASCII digits. */
+	Dig1 ^= 0x30;
+	Dig2 ^= 0x30;
+	Dig3 ^= 0x30;
+	Hex = Dec1 + Dec2*10 + Dec3*100;
+	return;
+}
+
 
 /* Multiply W with 16-bit variable (Arg2L:Arg2H) then divides by 16.
  * This mimicks multiplying by fractional factors i.e. multiply by 19
  * then divide by 16 is the same as multiplying by 1.1875
  * Call-return in Arg2 */
-static void Fracmult(uint8_t fraction4_4)
+static void Fracmult(uint8_t fraction4_4) __wparam
 {
 	Arg2 = (Arg2 * fraction4_4) >> 4;
 }
@@ -969,7 +1046,29 @@ static void Range(void)
 	Miles = 0;
 	return;
 }
-static void CapTempAdj(void);
+
+/* Use battery temp measured on powerup (Captempcomp)
+ * to determine adjustment value (multiplier) for correcting SOC
+ * The original comments are probably mistaken, not the correction factors.
+ */
+static uint8_t CapTempAdj(void)
+{
+	if (Captempcomp <= 36)		/* Less than 32F (Bug?) */
+		return 10;
+	if (Captempcomp <= 48)		/* Bug! 33-40F (probably just a bogus comment)*/
+		return 11;
+	if (Captempcomp <= 49)		/* 41-48F */
+		return 12;
+	if (Captempcomp <= 56)		/* 49-56F */
+		return 13;
+	if (Captempcomp <= 64)		/* 57-64F */
+		return 14;
+	if (Captempcomp <= 72)		/* 65-72 */
+		return 15;
+	if (Captempcomp <= 88)		/* 73-88F */
+		return 16;
+		return 17;
+}
 
 /* Suppress leading zeros.  Input is variable Digtemp. */
 static char Zerosupress(void)
@@ -1029,7 +1128,7 @@ static void TX_Mode(void)
 }
 
 /* Convert Fahrenheit to Centigrade uhm Celsius. */
-static uint8_t F2C(uint8_t fahrenheit)
+static uint8_t F2C(uint8_t fahrenheit) __wparam
 {
 	LZstat.NegTemp = 0;
 	Arg2 = fahrenheit;
