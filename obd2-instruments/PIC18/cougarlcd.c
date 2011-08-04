@@ -48,8 +48,8 @@ code char at __CONFIG4L conf4l =
 code char at __CONFIG5L conf5l = _CP0_OFF_5L & _CP1_OFF_5L;
 code char at __CONFIG5H conf5h = _CPB_OFF_5H & _CPD_OFF_5H;
 /* Check this. */
-code char at __CONFIG6L conf6l = 0xFF; /* ToDo */
-code char at __CONFIG6H conf6h = 0xFF; /* ToDo */
+code char at __CONFIG6L conf6l = 0xFF; /* ToDo:verify */
+code char at __CONFIG6H conf6h = 0xFF; /* ToDo:verify */
 code char at __CONFIG7L conf7l = _EBTR0_OFF_7L & _EBTR1_OFF_7L;
 
 #pragma std_sdcc99 
@@ -82,7 +82,7 @@ static const uint8_t bcapacityH = 0x06;
 static const uint8_t pmile = 32;
 static const char PWM_Max= 0xFF;
 static const char Sysval = 0x80; /* ToDo: configure as bitmap */
-static const char ALRM_lim = 21; /* Percentage SOC where alarm is tripped */
+static const uint8_t ALRM_lim = 21; /* Percentage SOC where alarm is tripped */
 /* Length of Profile 1 message that establishes offset to access Profile 2 */
 static const char PF2_Offset = 26;
 
@@ -288,24 +288,64 @@ static void LOW_ISR() __interrupt(2)
 	INTCONbits.TMR0IF = 0;		/* Clear timer0 interrupt flag */
 
 	if (CM_Delay) CM_Delay--;
-	if ( ! LZstat.ChargeMode) {	/* Check charge mode flag. */
-		if (bAmp <= 1) {		/* Skip SoC adjust */
+	if ( ! LZstat.ChargeMode) {	/* Driving/discharge mode. */
+		if (bAmp <= 1) {		/* If nearly discharged skip SoC adjust */
 			bAmptemp = bAmp;
-			CNT = 3;
 			bAmptemp >>= 3;
-			if (bAmptemp) {
+			/* At low reserve capacity we don't do Peukert adjustment. */
+			if (bAmptemp == 0) {
 				RES0 = bAmp;
 				RES1 = 0;
-			}
-			if (bAmptemp >= 48)
-				bAmptemp = 48;
-			Offset = bAmptemp;
+			} else {
+				if (bAmptemp >= 48)
+					bAmptemp = 48;
+				Offset = bAmptemp;
 #if 0
-			if (Sys_Config.Peukert1_20)
-				if (Sys_Config.PeukertBypass)
-					;
+				if (Sys_Config.Peukert1_20)
+					if (Sys_Config.PeukertBypass)
+						;
+				/* ToDo: fill in logic for Peukert table selection. */
+				/* ToDo: line 427 */
 #endif
-			/* ToDo: */
+				Offset += 85;
+				Arg2 = bAmp;
+				Fracmult(GetChar());
+			}
+			capacity -= RES0 + RES1<<8;
+			EE_count++;
+			/* Backup capacity to EEPROM every minute. */
+			if (EE_count >= 60)
+				Capstore();
+		}
+		/* Alarm */
+		if (SOC < ALRM_lim) {
+			ALRM ^= 1;
+			RLED ^= 1;
+		}
+		/* mAmp_test */
+		if (LZstat.mtrAmpsLow == 0 ||
+			LZstat.TermCount == 0 ||
+			Disp_count < 6) {
+			Disp_count++;
+			if (Disp_count == 5)
+				LZstat.TermCount = 1;
+		}
+	} else {					/* Charging mode */
+		if (bAmp > min_cAmp) {
+			GLED ^= 1;
+			if (++EE_count > 59) {
+				Capstore();
+				C_minutes++;
+				if (C_minutes == 60) {
+					C_hours++;
+					C_minutes = 0;
+				}
+			}
+			if (SOC >= 100) {
+				Arg2 = bAmp;
+				Fracmult(cEfficiency);
+				capacity += RES0;			/* Todo: Carry into capacityH.  check RES0 result return */
+			}
 		}
 	}
 
@@ -370,6 +410,7 @@ static void main(void) __interrupt(0) __naked
 	CHAR5 = 6;
 	Sys_Config.byte = Sysval;
 	CM_Delay = 2;				/* Set charge mode enable delay timer */
+	/* Fuel Gauge PWM output */
 	TRISCbits.TRISC2 = 1;
 	PR2 = 0xFF;
 	CCP1CON = 0x2C;
@@ -437,7 +478,6 @@ static void main(void) __interrupt(0) __naked
 		RLED = 0;
 		if (mTemp > MT_Max || bTemp > BT_Max || cTemp > CT_Max) {
 			RLED = 1;
-			/* ToDo Other stuff */
 			/* Set overtemp status */
 			if (Sys_Config.DisplayMode && ! LZstat.Overtemp) {
 				LZstat.Overtemp = 1;
@@ -770,9 +810,7 @@ static void A2DLoop(void)
 					LZstat.ChargeMode = 1;
 			} else
 				avg = 0;
-			/* ToDo: missing code. */
 		}
-		avg += Vacc_trim;
 		if (avg >= 2) {
 			/* Hysteresis routine. */
 			temp = bAmp;
@@ -1025,9 +1063,17 @@ static void SOC_Calc(void)
 	/* Disable timer interrupt. */
 	INTCONbits.TMR0IE = 0;
 	CNT = 0;
+	/* ToDo: capacityH copy!! */
 	captemp = capacity;
 	/* loopPc */
 	captemp -= pdiv;
+	RES23 = FG_Scale * (100 - (SOC < 20) ? 20 : SOC);
+	/* Not exactly the same code. */
+	if (((RES23) >> 6) > PWM_Max)
+		CCPR1L = 0;
+	else
+		CCPR1L = PWM_Max - RES23;
+	INTCONbits.TMR0IE = 1;
 }
 
 /* Calculate miles to empty (20%) based on SOC. */
