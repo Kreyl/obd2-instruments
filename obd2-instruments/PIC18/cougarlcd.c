@@ -43,14 +43,19 @@ code char at __CONFIG2L conf2l = _PWRT_ON_2L & _BOREN_OFF_2L & _BORV_2_2L;
 code char at __CONFIG2H conf2h = _WDT_OFF_2H & _WDTPS_1024_2H;
 code char at __CONFIG3H conf3h =
 	_MCLRE_ON_3H & _LPT1OSC_OFF_3H & _PBADEN_OFF_3H;
+/* Some installations will want to enable LVP -- low voltage programming
+ * that uses operating voltage instead of 14V for flash programming. */
 code char at __CONFIG4L conf4l =
 	_DEBUG_OFF_4L & _XINST_OFF_4L & _LVP_OFF_4L & _STVREN_OFF_4L;
+/* No code read protection -- CONFIG5 could be left at the default. */
 code char at __CONFIG5L conf5l = _CP0_OFF_5L & _CP1_OFF_5L;
 code char at __CONFIG5H conf5h = _CPB_OFF_5H & _CPD_OFF_5H;
-/* Check this. */
-code char at __CONFIG6L conf6l = 0xFF; /* ToDo:verify */
-code char at __CONFIG6H conf6h = 0xFF; /* ToDo:verify */
+/* Nor do we need write protection set in CONFIG6. */
+code char at __CONFIG6L conf6l = 0xFF;
+code char at __CONFIG6H conf6h = 0xFF;
+/* CONFIG7 blocks table reads -- turn off. */
 code char at __CONFIG7L conf7l = _EBTR0_OFF_7L & _EBTR1_OFF_7L;
+code char at __CONFIG7H conf7h = 0xFF;
 
 #pragma std_sdcc99 
 
@@ -60,7 +65,7 @@ code char at __CONFIG7L conf7l = _EBTR0_OFF_7L & _EBTR1_OFF_7L;
 
 /* Instructions that should be in a header file. */
 #define swapf(nibblepair)  { __asm SWAPF _##nibblepair , W __endasm;}
-#define naked_return  __asm RETURN __endasm
+#define naked_return  __asm RETFIE __endasm
 #else
 #warning Unknown compiler. PIC18 configuration space initialization omitted.
 #endif
@@ -70,12 +75,16 @@ typedef union uint24_un {
 		uint8_t L, M, H;
 	};
 	struct {
-		uint8_t High;
 		uint16_t ML;
+		uint8_t High;
+	};
+	struct {
+		uint16_t Low;
+		uint8_t HM;
 	};
 } uint24_t;
 
-#if 0
+#if ! defined(USE_DEFINE_NOT_CONST)
 /* Constants used at run time. */
 static const uint8_t MT_Max = 200; /* max motor temp for error LED */
 static const uint8_t CT_Max = 167; /* max controller temp for error LED */
@@ -85,7 +94,7 @@ static const uint8_t bcapacityM = 0x5E;
 static const uint8_t bcapacityH = 0x06;
 static const uint8_t pmile = 32;
 static const char PWM_Max = 0xFF;
-static const char Sysval = 0x80; /* ToDo: configure as bitmap */
+static const uint8_t Sysval = 0x80;
 static const uint8_t ALRM_lim = 21; /* Percentage SOC where alarm is tripped */
 /* Length of Profile 1 message that establishes offset to access Profile 2 */
 static const char PF2_Offset = 26;
@@ -114,7 +123,7 @@ static const uint8_t D_refresh = 1;
 #define bcapacityH  0x06
 #define pmile  32
 #define PWM_Max  0xFF
-#define Sysval  0x80 /* ToDo: configure as bitmap */
+#define Sysval  0x80 /* Bitmap w/ only high P compensation set. */
 #define ALRM_lim  21 /* Percentage SOC where alarm is tripped */
 /* Length of Profile 1 message that establishes offset to access Profile 2 */
 #define PF2_Offset  26
@@ -215,10 +224,10 @@ union Sys_Config_type {				/* System status flags */
 		unsigned bAmpSource:  1; /* Battery amp source.
 								  * 0=local A/D , 1=motor controller */
 		unsigned UseMetric 	: 1;	 /* Display metric units */
-		unsigned PeukertBypass: 1;	 /* Peukert bypass (1.0) */
-		unsigned Peukert1_20: 1;	 /* Peukert exponent 1.20 */
-		unsigned bAmp300mVOffset: 1;	/* Do battery amp 300mV correction */
-		unsigned b7   	: 1;	 /*  */
+		unsigned PeukertRange0: 1;	 /* Peukert exponent 1.20 */
+		unsigned PeukertRange1: 1;	 /* Peukert bypass w/ 1,1 */
+		unsigned bAmp300mVOffset : 1;	/* Do battery amp 300mV correction */
+		unsigned PeukertRangeHigh: 1;	/* Set high exponent range */
 	};
 	uint8_t byte;				/* Clear or set as whole byte. */
 } Sys_Config;
@@ -241,12 +250,32 @@ union LZstat_type {				/* System status flags */
 } LZstat;
 uint8_t C_hours, C_minutes, CM_Delay, RF_Count;
 
+#if 0							/* Initialization for the EEPROM */
+#pragma udata eedata  _eeprom_init 
+uint8_t eeprom_init[] = { 0x00, 0x06, 0x5e };
+#endif
+
+/* Interrupt vectors.  By default the compiler pushes a bunch of state
+ * onto the stack.  To avoid this overhead we must use __naked, but that
+ * eliminate the automatic vector entry.  So we construct it
+ * manually. */
+
+void START(void) __naked;
+void HIGH_ISR(void) __naked;
+void LOW_ISR(void) __naked;
+
+void RES_VECT(void) __naked __interrupt 0
+{ __asm goto _START;  __endasm; }
+void ISRH(void) __naked __interrupt 1
+{ __asm goto _HIGH_ISR;  __endasm; }
+void ISRL(void) __naked __interrupt 2
+{ __asm goto _LOW_ISR;  __endasm; }
 
 /* High priority interrupt service routine used for serial port receive
  * from controller.  This is hard-coded to recognize the Cougar "real time
  * display" format, and fragile because if it.
  */
-static void HIGH_ISR(void) __interrupt(1)
+void HIGH_ISR(void) __naked
 {
 	/* Save the W/working, status and bank select registers */
 	PIR1bits.RCIF = 0;
@@ -296,16 +325,14 @@ static void HIGH_ISR(void) __interrupt(1)
 	}
 #endif
 	/* ToDo: Restore the W/working, status and bank select registers */
-	return;
+	naked_return;
 }
 
 /* The "low priority" interrupt is used for the 1Hz timer. */
-static void LOW_ISR() __interrupt(2)
+void LOW_ISR() __naked
 {
 	/* Save the W/working, status and bank select registers */
-#if 0
-	W_TEMP = working;
-#endif
+	W_TEMP = WREG;
 	STATUS_TEMP = STATUS;
 	BSR_TEMP = BSR;
 	/* Save other variables. */
@@ -385,9 +412,7 @@ static void LOW_ISR() __interrupt(2)
 	TMR0H = 0x85;
 
 	/* Restore the W/working, status and bank select registers */
-#if 0  /* ToDo: */
-	working = W_TEMP;
-#endif
+	WREG = W_TEMP;
 	STATUS = STATUS_TEMP;
 	BSR = BSR_TEMP;
 	/* Restore other variables.
@@ -399,11 +424,10 @@ static void LOW_ISR() __interrupt(2)
 	Arg2 = Arg2_temp;
 	T0CONbits.TMR0ON = 1;		/* Enable timer0 */
 
-	return;
+	naked_return;
 }
 
-/* START AKA main(). */
-static void main(void) __interrupt(0) __naked
+void START(void) __naked
 {
 	/* Initialize ports. */
 	/* Select the external OSC1 8MHz crystal. */
@@ -523,23 +547,31 @@ static void main(void) __interrupt(0) __naked
 			RXconvrt();
 		A2DLoop();
 		SOC_Calc();
+
 		Temp_ptr = mTemp;
-		Temp_ptr == 20;
+		if (Temp_ptr < 20)
+			Temp_ptr = 20;
+		Temp_ptr -= 20;
 		mTemp = GetTemp();
+		Temp_ptr = bTemp;
+		if (Temp_ptr < 20)
+			Temp_ptr = 20;
+		Temp_ptr -= 20;
 		bTemp = GetTemp();
+
 		if (SW1)
 			Button();
 		if (SW2)
 			TX_Mode();
 		RLED = 0;
-		if (mTemp > MT_Max || bTemp > BT_Max || cTemp > CT_Max) {
+		if (mTemp >= MT_Max || bTemp >= BT_Max || cTemp > CT_Max) {
 			RLED = 1;
 			/* Set overtemp status */
 			if (Sys_Config.DisplayMode && ! LZstat.Overtemp) {
 				LZstat.Overtemp = 1;
+				Offset = 36;		/* "Tmot Tcont Tbat " message */
+				Messnum = 2;		/* Message number. */
 			}
-			Offset = 36;		/* "Tmot Tcont Tbat " message */
-			Messnum = 2;		/* Message number. */
 		} else
 			LZstat.Overtemp = 0;
 
@@ -617,7 +649,7 @@ static void main(void) __interrupt(0) __naked
 
 /* Note: Either the ASM code has the offsets wrong, or there is
  * silent byte padding. */
-char Text_Table[] =
+const char Text_Table[] =
 	"Volts mAmp bAmp \0\0"
 	"aVolt  SOC  MTE \0\0"
 	"Tmot Tcont Tbat \0\0"
@@ -626,7 +658,7 @@ char Text_Table[] =
 
 #if defined(Sysval) && Sysval >= 128
 
-uint8_t Peukert_1_30_tbl[] = {			/* Peukert 1.30 multipliers */
+const uint8_t Peukert_1_30_tbl[] = {			/* Peukert 1.30 multipliers */
 	0x12,0x16,0x19,0x1B, 0x1D,0x1E,0x20,0x21,
 	0x22,0x23,0x24,0x24, 0x26,0x27,0x28,0x29, /* index 64 */
 	0x29,0x2A,0x2B,0x2B, 0x2C,0x2D,0x2D,0x2E,
@@ -634,7 +666,7 @@ uint8_t Peukert_1_30_tbl[] = {			/* Peukert 1.30 multipliers */
 	0x33,0x33,0x34,0x34, 0x34,0x35,0x35,0x35,
 	0x36,0x36,0x36,0x37, 0x37,0x37,0x38,0x38, /* index 96 */
 };
-uint8_t Peukert_1_25_tbl[] = {			/* Peukert 1.25 multipliers */
+const uint8_t Peukert_1_25_tbl[] = {			/* Peukert 1.25 multipliers */
 	0x12,0x15,0x17,0x19, 0x1A,0x1B,0x1C,0x1D,
 	0x1E,0x1F,0x20,0x20, 0x21,0x22,0x22,0x23,	/* index 112 */
 	0x23,0x24,0x24,0x25, 0x25,0x26,0x26,0x26,
@@ -642,7 +674,7 @@ uint8_t Peukert_1_25_tbl[] = {			/* Peukert 1.25 multipliers */
 	0x2A,0x2A,0x2A,0x2B, 0x2B,0x2B,0x2B,0x2C,
 	0x2C,0x2C,0x2C,0x2D, 0x2D,0x2D,0x2D,0x2D,	/* index 144 */
 };
-uint8_t Peukert_1_20_tbl[] = {			/* Peukert 1.20 multipliers */
+const uint8_t Peukert_1_20_tbl[] = {			/* Peukert 1.20 multipliers */
 	0x12,0x14,0x15,0x17, 0x18,0x19,0x1A,0x1A,
 	0x1B,0x1B,0x1C,0x1C, 0x1D,0x1D,0x1E,0x1E,	/* index 160 */
 	0x1E,0x1F,0x1F,0x1F, 0x1F,0x20,0x20,0x20,
@@ -651,7 +683,7 @@ uint8_t Peukert_1_20_tbl[] = {			/* Peukert 1.20 multipliers */
 	0x24,0x24,0x24,0x25, 0x25,0x25,0x25,0x25,	/* index 192 */
 };
 #else
-uint8_t Peukert_1_15_tbl[] = {
+const uint8_t Peukert_1_15_tbl[] = {
 	0x11,0x13,0x14,0x15,0x15,0x16,0x17,0x17,
 	0x17,0x18,0x18,0x18,0x19,0x19,0x19,0x19,
 	0x1A,0x1A,0x1A,0x1A,0x1B,0x1B,0x1B,0x1B,
@@ -659,7 +691,7 @@ uint8_t Peukert_1_15_tbl[] = {
 	0x1D,0x1D,0x1D,0x1D,0x1D,0x1D,0x1D,0x1E,
 	0x1E,0x1E,0x1E,0x1E,0x1E,0x1E,0x1E,0x1E
 };
-uint8_t Peukert_1_10_tbl[] = {
+const uint8_t Peukert_1_10_tbl[] = {
 	0x11,0x12,0x12,0x13,0x13,0x14,0x14,0x14,
 	0x15,0x15,0x15,0x15,0x15,0x16,0x16,0x16,
 	0x16,0x16,0x16,0x16,0x16,0x17,0x17,0x17,
@@ -667,7 +699,7 @@ uint8_t Peukert_1_10_tbl[] = {
 	0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18,
 	0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18
 };
-uint8_t Peukert_1_05_tbl[] = {
+const uint8_t Peukert_1_05_tbl[] = {
 	0x10,0x11,0x11,0x11,0x12,0x12,0x12,0x12,
 	0x12,0x12,0x12,0x12,0x12,0x12,0x12,0x13,
 	0x13,0x13,0x13,0x13,0x13,0x13,0x13,0x13,
@@ -677,7 +709,8 @@ uint8_t Peukert_1_05_tbl[] = {
  };
 #endif
 
-uint8_t Temp_Table[45*8+1] = {
+/* Temperature sensor map from raw reading to degrees F. */
+const uint8_t Temp_Table[45*8+1] = {
 	0x05,0x07,0x09,0x0B,0x0D,0x0F,0x10,0x12,
 	0x14,0x16,0x17,0x19,0x1A,0x1C,0x1D,0x1E,
 	0x20,0x21,0x23,0x24,0x25,0x27,0x28,0x29,
@@ -726,15 +759,12 @@ uint8_t Temp_Table[45*8+1] = {
 	0xFE
 };
 
-char TX_Table[] = "rtd-period \0"
+const char TX_Table[] = "rtd-period \0"
 "200\0"
 "c-rr 15\r"
 "bat-amps-lim 350\r\0"
 "c-rr 5\r"
 "bat-amps-lim 190\r";
-
-
-/* Omitted: peukert multiplier tables. */
 
 static void INIT_LCD(void)
 {
@@ -1100,6 +1130,7 @@ static char GetChar(void)
 	return Text_Table[Offset];
 }
 
+/* Convert raw thermister reading to the temperature with a table. */
 static char GetTemp(void)
 {
 	return Temp_Table[Temp_ptr];
@@ -1289,7 +1320,7 @@ static uint8_t EERead(uint8_t index) __wparam
 
 /*
  * Local variables:
- *  compile-command: "sdcc cougarlcd.c -mpic16 -p18f2480 --pno-banksel --fommit-frame-pointer --optimize-df --denable-peeps --no-crt"
+ *  compile-command: "sdcc cougarlcd.c -mpic16 -p18f2480 --pno-banksel --fommit-frame-pointer --optimize-df --optimize-cmp -denable-peeps --no-crt --no-c-code-in-asm "
  *  c-indent-level: 4
  *  c-basic-offset: 4
  *  tab-width: 4
