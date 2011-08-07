@@ -62,13 +62,17 @@ static const char versionA[] =
 #if defined(STM32)
 #include <armduino.h>
 extern void *memset(void *s, int c, long n);
-#elif defined(__AVR_ATmega168__)
-#define MEGA168
-#elif defined(__AVR_ATmega1280__)
-#define MEGA1280
-#endif
 
-#if !defined(STM32)
+#elif defined(SDCC_pic16)
+#include <stdint.h>
+#include <string.h>
+#define inline
+#define __attribute__(...) 
+#define PGM_P const char *
+#define PSTR(str) str
+#define prog_uint16_t uint16_t
+
+#elif defined(__AVR)
 #include <stdlib.h>
 #include <string.h>
 #include <avr/io.h>
@@ -76,10 +80,14 @@ extern void *memset(void *s, int c, long n);
 #include <avr/interrupt.h>
 #if defined(IOM8)
 #include <avr/iom8.h>
-#elif defined(MEGA168)
+#elif defined(__AVR_ATmega168__)
 #include <avr/iom168.h>
-#elif defined(MEGA1280)
+#define MEGA168
+#elif defined(__AVR_ATmega1280__)
 #include <avr/iom1280.h>
+#define MEGA1280
+#endif
+
 #else
 #error "Undefined processor type."
 #endif
@@ -93,7 +101,6 @@ extern void *memset(void *s, int c, long n);
 #endif
 
 #define use_direct_pwm 0
-#endif
 #endif
 
 #include "vvvvroom.h"
@@ -142,7 +149,11 @@ struct CAN_multiframe {
 	uint16_t last_send;				/* Use for flow control delay. */
 	uint16_t id;					/* Usually the ECU ID. */
 };
+#if defined(SDCC_pic16)
+static struct CAN_multiframe VIN = {0, };
+#else
 static struct CAN_multiframe VIN = {msg_cnt:0, };
+#endif
 
 /* Not used -- better known as the numbers than the name.
  * Here for reference only. */

@@ -43,7 +43,7 @@ unsigned char uart_putch(char c);
 void setup_uart(void);
 
 extern int serprintf(const char *format, ...)
-	__attribute__ ((format(printf, 1, 2)));;
+	__attribute__ ((format(printf, 1, 2)));
 
 #define CMD_LINE_LEN	80		/* Maximum input line allowed. */
 

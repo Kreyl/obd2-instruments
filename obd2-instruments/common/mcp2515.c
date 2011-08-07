@@ -28,7 +28,22 @@ static const char versionA[] =
 /* The STM32 doesn't need the awkward Harvard architecture hacks of the AVR. */
 #include <armduino.h>
 extern void *memset(void *s, int c, long n);
-#else
+
+#elif defined(SDCC_pic16)
+#include <stdint.h>
+#include <stdarg.h>
+#include <string.h>
+#include <pic18fregs.h>
+#define inline
+#define __attribute__(...) 
+#define prog_uint8_t uint8_t
+#define prog_uint16_t uint16_t
+#define PGM_P const char *
+#define PSTR(str) str
+#define PROGMEM const
+#define pgm_read_byte(addr) (*(const char *)(addr))
+
+#elif defined(__AVR)
 #include <avr/io.h>
 #include <avr/pgmspace.h>
 #include <avr/interrupt.h>
@@ -43,7 +58,7 @@ extern void *memset(void *s, int c, long n);
 #include "can.h"
 
 extern int serprintf(const char *format, ...)
-	__attribute__ ((format(printf, 1, 2)));;
+	__attribute__ ((format(printf, 1, 2)));
 
 /* Our CAN ID for operational (non-diagnostic, higher priority) frames. */
 #define CAN_PHY_ADDR 0x420
@@ -66,21 +81,32 @@ struct tx_buf_state {
 #define GPIO_SPI_BRR GPIOA_BRR
 #define GPIO_SPI_BSRR GPIOA_BSRR
 #define CAN_CS_ENABLE \
-	GPIO_SPI_BRR = (1 << SPI_CAN_CS);		/* Chip select low */
+	GPIO_SPI_BRR = (1 << SPI_CAN_CS)		/* Chip select low */
 #define CAN_CS_DISABLE \
-	GPIO_SPI_BSRR = (1 << SPI_CAN_CS);		/* Chip select high */
+	GPIO_SPI_BSRR = (1 << SPI_CAN_CS)		/* Chip select high */
 #define SPI_CLK_DIV SPI_BRdiv4
 #define SPDR	SPI1_DR
 #define SPSR	SPI1_SR
 #define SPI_CR1 SPI1_CR1
 #define SPI_CR2 SPI1_CR2
-#else
+
+#elif defined (SDCC_pic16)
+#define SPDR	SSPBUF
+#define SPSR	SSPSTAT
+#define SPI_RXNE  0x01
+#define CAN_CS_PIN  PORTAbits.SS
+#define CAN_CS_ENABLE	CAN_CS_PIN = 0
+#define CAN_CS_DISABLE	CAN_CS_PIN = 1
+
+#elif defined(__AVR)
 /* GCC-avr compiles these macros to single instructions. */
 #define PB_CAN_CS DDB0		/* Abitrary digital pin used for active-low /CS */
-#define CAN_CS_ENABLE	PORTB &= ~(1 << PB_CAN_CS);		/* Chip select low */
-#define CAN_CS_DISABLE	PORTB |= (1 << PB_CAN_CS);		/* Chip select high */
+#define CAN_CS_ENABLE	PORTB &= ~(1 << PB_CAN_CS)		/* Chip select low */
+#define CAN_CS_DISABLE	PORTB |= (1 << PB_CAN_CS)		/* Chip select high */
 #define SPI_CLK_DIV	(0 << SPR0) /* 0,1,2,3 is divisor by 4,16,64,128  */
 #define SPI_RXNE  (1<<SPIF)
+#else
+#warning "Undefined SPI interface."
 #endif
 
 /* Symbolic constants for the MCP2515 CAN controller.
@@ -157,9 +183,9 @@ const uint8_t PROGMEM mcp_reg60_init[] = {
 /* Sending a byte on SPI is easy: write, check status for completion,
  * and read the byte simultaneously clocked in.
  */
-char inline SPI_Transmit(char data)
+char inline SPI_Transmit(char databyte)
 {
-	SPDR = data;
+	SPDR = databyte;
 	while ( ! (SPSR & SPI_RXNE))
 		;
 	return SPDR;
@@ -170,7 +196,7 @@ char inline SPI_Transmit(char data)
  * Using this makes the code a bit harder to read, but really shrinks
  * the generated code size.
  */
-void SPI_transmit_array(const prog_uint8_t *data, uint8_t size)
+void SPI_transmit_array(const prog_uint8_t *dataptr, uint8_t size)
 {
 	CAN_CS_ENABLE;
 #if defined(STM32) && defined(SPI_OVERLAP_CHECK)
@@ -178,13 +204,13 @@ void SPI_transmit_array(const prog_uint8_t *data, uint8_t size)
 	 * both Tx-empty and Rx-filled status bits.
 	 * It has a termination bug.  Better, it should be rewritten for DMA.
 	 */
-	SPDR = *data++;
+	SPDR = *dataptr++;
 	while (--size > 0) {
 		int result;
 		int i = 0;
 		while ( ! (SPSR & SPI_TXE) && ++i > 5)
 			;
-		SPDR = *data++;
+		SPDR = *dataptr++;
 		while ( ! (SPSR & SPI_RXNE) && ++i > 5)
 			;
 		(volatile)SPDR;
@@ -197,14 +223,14 @@ void SPI_transmit_array(const prog_uint8_t *data, uint8_t size)
 	SPDR;
 #elif defined(STM32) && defined(SPI_OVERLAP)
 	do {
-		SPDR = data;
+		SPDR = dataptr;
 		while ( ! (SPSR & TXE))
 			;
-		SPI_Transmit(pgm_read_byte(data++));
+		SPI_Transmit(pgm_read_byte(dataptr++));
 	} while (--size != 0);
 #else  /* Simple loop */
 	do {
-		SPI_Transmit(pgm_read_byte(data++));
+		SPI_Transmit(pgm_read_byte(dataptr++));
 	} while (--size != 0);
 #endif
 	CAN_CS_DISABLE;
@@ -236,7 +262,12 @@ uint8_t CAN_dev_init(void)
 	/* Configure SPI: SPI enable, 8 bit, MSB first, 0,0, Master, F_OSC/4. */
 	SPI_CR1 = 0x4300 | SPI_SPE | SPI_CLK_DIV | SPI_MSTR;
 	SPI_CR2 = 0;
-#else
+
+#elif defined (SDCC_pic16)
+	/* Configure SPI: SPI enable, 0,0, Master, F_OSC/4. */
+	SSPSTAT = 0x40;				/* Note CKE=1 for SPI0,0! */
+	SSPCON1 = 0x20;
+#elif defined(__AVR)
 	DDRB |= ((1<<DDB2)|(1<<DDB1)|(1<<PB_CAN_CS));
 	/* Turn on: SPI enable, MSB first, 0,0, Master, F_OSC/4. */
 	SPCR = (1 << SPE) | (1 << MSTR) | SPI_CLK_DIV;
