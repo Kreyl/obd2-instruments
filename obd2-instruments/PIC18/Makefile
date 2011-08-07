@@ -9,7 +9,7 @@ ASM=gpasm
 AR=gplib			# Not quite 'ar' compatible
 
 #CFLAGS= -I/usr/share/sdcc/lib/pic16 
-CFLAGS+= -mpic16 -p18f2480
+CFLAGS+= -mpic16 -p18f2480 -I.
 LDFLAGS= -s /usr/share/gputils/lkr/18f2480.lkr
 # LDFLAGS= 
 
