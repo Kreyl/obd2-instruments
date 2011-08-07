@@ -31,9 +31,22 @@ typedef unsigned short uint16_t;
 typedef signed short int16_t;
 typedef unsigned int uint32_t;
 typedef signed int int32_t;
-#else
+
+#elif defined (SDCC_pic16)
+#include <stdint.h>
+#define inline
+#define __restrict
+#define PGM_P const char *
+#define pgm_read_byte(addr) (*(const char *)(addr))
+#define LONG_SZ sizeof(long)
+
+#elif defined(__AVR)
 #include <avr/pgmspace.h>
 #define LONG_SZ 4
+
+#else
+#warning "Processor type undefined."
+#define LONG_SZ sizeof(long)
 #endif
 
 /* Send a character to the output device.
@@ -88,13 +101,13 @@ void uint_to_hex_uart(unsigned val, unsigned char digits)
 	} while (*++str);
 }
 
-int printf(const PGM_P __restrict format, ...);
+int serprintf(const PGM_P __restrict format, ...);
 
-int serprintf(PGM_P format, ...)
+int serprintf(const PGM_P format, ...)
 {
 	va_list args;
-	va_start(args, format);
 	uint8_t c, j = 0;
+	va_start(args, format);
 
 	while ((c = pgm_read_byte(format++))) {
 		if (j) {
