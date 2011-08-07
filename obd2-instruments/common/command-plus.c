@@ -14,7 +14,15 @@ static const char versionA[] =
 static int atoi(const char *nptr);
 static int strcmp(const char *s1, const char *s2);
 
-#else
+#elif defined (SDCC_pic16)
+#include <stdint.h>
+#include <string.h>
+#define __attribute__(...) 
+#define PGM_P const char *
+#define PSTR(str) str
+#define prog_uint16_t uint16_t
+
+#elif defined(__AVR)
 
 #if defined(__AVR_ATmega168__)
 #define MEGA168
