@@ -23,9 +23,28 @@
 
 #pragma std_sdcc99 
 
+#define inline			/* Not understood by SDCC  */
+#define __restrict
+#define __attribute__(attributes)
+#define PGM_P const char *
+#define PROGMEM const
+#define PSTR(str) str
+#define pgm_read_byte(addr) (*(const char *)(addr))
+typedef uint16_t prog_uint16_t;
+
+/* Disable interrupts globally. */
+#define cli() INTCONbits.GIE = 0
+#define sei() INTCONbits.GIE = 1
+
 #ifndef tach_get_QRPM
 #define tach_get_QRPM() 1234*4
 #endif
+
+void setup_clock(void);
+void setup_io_ports(void);
+void setup_timers(void);
+/* Get character from input FIFO, return -1 if empty. */
+int uart_getchar(void);
 
 /* Parameters for the 5V reference 10-bit PIC A/D converter. */
 #define ADC_VOLTAGE_SCALE 625
@@ -47,7 +66,7 @@ extern unsigned tach_target_qrpm;			/* Target speed in QRPM */
 extern uint16_t m_current_peak;
 extern uint16_t use_direct_pwm;
 extern int current_fb;			/* Current feedback, actual current. */
-extern volatile uint32_t clock_1msec;
+extern volatile uint16_t clock_1msec;
 
 /* Throttle settings grouped in one spot. */
 struct throttle_params {
@@ -75,6 +94,14 @@ typedef struct {
 } realtime_data_type;
 
 extern realtime_data_type rt_data;
+
+/* The persistent configuration parameters stored in the EEPROM. */
+typedef struct {
+	unsigned magic;					/* Version/type key. */
+	uint16_t motor_amps_limit;		// Force PWM=0 when m_current>limit
+} __attribute__((packed)) config_type;
+
+extern config_type config;
 
 #endif
 /*
