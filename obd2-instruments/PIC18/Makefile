@@ -9,7 +9,7 @@ ASM=gpasm
 AR=gplib			# Not quite 'ar' compatible
 
 #CFLAGS= -I/usr/share/sdcc/lib/pic16 
-CFLAGS+= -mpic16 -p18f2480 -I.
+CFLAGS+= -mpic16 -p18f2480 -I. -I../common/
 LDFLAGS= -s /usr/share/gputils/lkr/18f2480.lkr
 # LDFLAGS= 
 
@@ -31,12 +31,12 @@ VPATH=../common/
 
 .phony:	all clean distclean program verify download tar
 
-all: revolt-lcd.hex can-control.hex
+all: revolt-lcd.hex can-control.hex cougarlcd.hex
 
-revolt-lcd.hex: lcd.o pic-can.o pic-dev.o revolt.o
+revolt-lcd.hex: lcd.o eCAN.o pic-dev.o revolt.o
 	$(CC) -mpic16 -p18f2480 -o $@ -m $^
 
-can-control.hex: can-control.o printf.o command-plus.o pic-can.o pic-dev.o
+can-control.hex: can-control.o printf.o command-plus.o eCAN.o pic-dev.o
 	$(CC) -mpic16 -p18f2480 -o $@ -m $^
 
 can-control-2515.hex: can-control.o printf.o command-plus.o mcp2515.o pic-dev.o
@@ -47,6 +47,6 @@ blinky.hex: blinky.o
 	$(CC) $(CFLAGS) -o $@ -m $^ /usr/share/sdcc/lib/pic16/libdev18f2480.lib
 
 clean:
-	rm -f *.o *.cof *.elf *.bin *.lst *.cod
+	rm -f *.o *.cof *.elf *.bin *.lst *.cod *.asm
 distclean: clean
 	rm -f *~ *.hex
