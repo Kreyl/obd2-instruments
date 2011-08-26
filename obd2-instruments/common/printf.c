@@ -22,7 +22,6 @@
 
 #include <stdarg.h>
 #if defined(STM32)
-#define LONG_SZ 8
 #define PGM_P __const void *
 #define pgm_read_byte(addr) (*(const char *)(addr))
 typedef unsigned char uint8_t;
@@ -32,21 +31,20 @@ typedef signed short int16_t;
 typedef unsigned int uint32_t;
 typedef signed int int32_t;
 
-#elif defined (SDCC_pic16)
+#elif defined(SDCC_pic16)
 #include <stdint.h>
 #define inline
 #define __restrict
 #define PGM_P const char *
 #define pgm_read_byte(addr) (*(const char *)(addr))
-#define LONG_SZ sizeof(long)
 
 #elif defined(__AVR)
 #include <avr/pgmspace.h>
-#define LONG_SZ 4
 
 #else
 #warning "Processor type undefined."
-#define LONG_SZ sizeof(long)
+#define PGM_P const char *
+#define pgm_read_byte(addr) (*(const char *)(addr))
 #endif
 
 /* Send a character to the output device.
@@ -134,13 +132,13 @@ int serprintf(const PGM_P format, ...)
 				} while (1);
 				break;
 			}
-			case 'l':  j = LONG_SZ;  continue;
+			case 'l':  j = sizeof(long);  continue;
 			case 'u':
-				u32_to_uart(j == LONG_SZ ? va_arg(args, long) :
+				u32_to_uart(j == sizeof(long) ? va_arg(args, long) :
 							va_arg(args, int), j);
 				break;
 			case 'd': {
-				int32_t val = (j == LONG_SZ ? va_arg(args, long) :
+				int32_t val = (j == sizeof(long) ? va_arg(args, long) :
 							   va_arg(args, int));
 				if (val < 0) {
 					serial_putch('-');
@@ -159,7 +157,7 @@ int serprintf(const PGM_P format, ...)
 					serial_putch(c);		/* Match case 0x or 0X */
 				}
 #if 1
-				uint_to_hex_uart(j == LONG_SZ ? va_arg(args, long) :
+				uint_to_hex_uart(j == sizeof(long) ? va_arg(args, long) :
 								 va_arg(args, int), j);
 #else
 				if (j == 4) {
