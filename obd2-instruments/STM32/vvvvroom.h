@@ -14,7 +14,7 @@
 	of the GNU General Public License (GPL), incorporated herein by
 	reference.  Firmware interacting with these functions are derivative
 	works and thus are covered the GPL.  They must include an explicit
-	GPL notice.
+	GPL notice and follow the terms of the license.
 
 	Other contributers:
 	<currently none>
@@ -25,47 +25,27 @@
 #include <armduino.h>
 #endif
 
-/* Primary controller clock (Oscillator) in cycles per second.
- * This name is used by the AVR header files for baudrate and delay.
- */
-#if !defined(F_CPU) || F_CPU == 0
-#define F_CPU 16000000
-#endif
-
 /* Msec to stop status output on keystroke. */
 #define RTD_SILENCE_ON_INPUT 5000
 
 /* The limit on PWM count when pulse width is proportional to the throttle. */
 #define PROPORTIONAL_PWM_MAX 300
 
-/* The number of 16MHz (67 nsec) cycles between low and high side devices
- * being enabled.  This may vary based on the device and isolation speed.
+/* The number of cycles between low and high side devices
+ * being enabled.  This varies based on the PWM clock, isolation delay,
+ * the gate drive power and drive device.
  * Zero is allowed if the gate driver handles the deadtime.
  */
 #define PWM_SR_DEADTIME 10
 
+
+
 /* Some symbolic pin definitions.
  * We can only be a little hardware-independent, as we must write
- * to the specific byte-wide port.  We put the port letter in the
- * symbolic name to indicate this. */
-
-#if defined(MEGA1280)
-#define PB_LED (1 << PB7)			/* Arduino Mega on-board LED */
-#define PD_CONTACTOR (1 << PD7)		/* Contactor Opto LED, low to light */
-#define PD_OC_CLEAR (1 << PD6)		/* Low clears an OverCurrent fault. N/C */
-#elif defined(COUGAR)
-#define PB_PWM (1 << PB1)			/* PWM output pin (high to turn FETs on)*/
-#define PINB_OC_STATE (1 << PINB0)	/* OverCurrent state (high means fault) */
-#define PB_OC_CLEAR (1 << PB2)		/* Low clears an OverCurrent fault. */
-#define PD_LED (1 << PD6)			/* Cougar Idle LED, high to light LED */
-/*
- * Port C on the Cougar controls the analog inputs.
- * Only three analog inputs used, these pins must be inputs, weak pullups off.
+ * to the specific GPIO port.  We put the port letter in the
+ * symbolic name to indicate this.
  */
-#define PC_ANALOGS_USED ((1 << PC0) | (1 << PC1) | (1 << PC2))
-#elif defined(GPIOC_ODR)
 #define PD_CONTACTOR (1 << 7)		/* Contactor coil drive, low to turn on. */
-#endif
 
 /* Set the SPI port to communicate with the MCP2515 CAN controller. */
 #if defined(STM32)
@@ -94,8 +74,10 @@
 #define NUM_ADC_CHANNELS 16
 #endif
 
-/* The Cougar controller uses only three channels
- * 	ADC_CHANNEL_THROTTLE=0,	ADC_CHANNEL_TEMP=1,	ADC_CHANNEL_M_CURRENT=2,
+extern volatile uint16_t raw_adc[NUM_ADC_CHANNELS];
+extern volatile unsigned raw_adc_sample_time[NUM_ADC_CHANNELS];
+
+/* The mapping of the A/D converter channels.
  * Additional channels are only on our controller. */
 enum {
 	ADC_CHANNEL_THROTTLE=5,		/* Throttle input. */
@@ -105,9 +87,7 @@ enum {
 	ADCChan_HSTemp2=4,				/* Heaksink #2 temperature. */
 	ADCChan_HSTemp3=5,				/* Heaksink #3 temperature. */
 	ADCChan_MotorTemp=6, 			/* Motor case temperature. */
-	/* The following are traction voltage referenced and may be on an
-	 * isolated converter.
-	 */
+	/* The following are traction voltage referenced. */
 	ADCChan_B_Volts=8,				/* Traction battery and cap rail voltage */
 	ADCChan_C_Volts=9,				/* (0-200V by 0.2V, 10 bits minimum) */
 	ADCChan_M_Volts=11,				/* Output rail average voltage. */
@@ -119,24 +99,7 @@ enum {
 	ADCChan_D2_Volts=15,			/* Gate driver voltage- */
 };
 
-/* Program and EEPROM memory space constants. */
-#define PROGSTART 0x0000	  /* Program start address */
-/* Address in EEPROM of our persistent configuration tables. */
-#define EE_CONFIG_ADDRESS 0	  /* Base address of config in EEPROM. */
-#define EE_CONFIG_COPIES 4	  /* Duplicate copies of config in EEPROM */
-
-/*
- * The Cougar board has a hardware OverCurrent latch that blocks the PWM
- * motor pulses.  The software must reset the latch by driving a pin low
- * for the latch reset time.  This should be under 60ns for the 74HC00 at
- * 5V.  The Cougar firmware waits 4 instruction cycles to be certain.
- */
-#if 0
-#define OC_CLEAR_ENABLED	/* Define to enable AVR to clear OC fault */
-#define NUM_OC_CYCLES_OFF 4	/* Number of overcurrent cycles off (at 4KHz) */
-#endif
-
-/* Number of cycles (milliseconds) the throttle may out of range before a
+/* Number of milliseconds the throttle may out of range before a
  * a fault is set. */
 #define THROTTLE_FAULT_COUNTS 200
 
@@ -151,12 +114,6 @@ enum {
  * otherwise, we continue with that here.
  */
 #define MAX_CURRENT_REF 511
-
-/* Overspeed is detected by an abnormally low motor current for the PWM
- * perecentage.  This is the number of cycles (milliseconds) before an
- * overspeed fault is set.
- */
-#define MOTOR_OS_DETECT_TIME 10
 
 /* A somewhat arbitrary number for thermal cut-back when using a LM335.
  * Change if using a different sensor.
@@ -173,22 +130,11 @@ enum {
 #define THERMAL_CUTBACK_START 712
 extern int16_t overheat;			/* A positive value indicates overheat */
 
-/* Cougar firmware included an option to use a 8KHz PWM signal.
- * We temporarily are including the same option to see how it impacts
- * heat and noise.  Most of the code is configured to allow an arbitrary
- * PWM, constrained by the need to sample the motor current in the middle
- * of the on "push" pulse.
- */
-#if defined(USE_PWM8K)			/* Here just for documentation. */
-#define PWM8K
-#endif
-
 /* The possible faults are bitmapped into a byte. */
-#define THROTTLE_FAULT (1 << 0)
-#define VREF_FAULT (1 << 1)
-#define PRECHARGE_WAIT (1 << 5)
-#define MOTOR_OS_FAULT (1 << 6)
-#define HPL_FAULT (1 << 7)
+enum {
+	THROTTLE_FAULT = (1 << 0), VREF_FAULT = (1 << 1),
+	PRECHARGE_WAIT = (1 << 5), MOTOR_OS_FAULT = (1 << 6), HPL_FAULT = (1 << 7)
+};
 
 #if 0
 extern volatile unsigned char fault_bits;
@@ -269,9 +215,6 @@ void tach_tick(uint8_t counter_8k, uint8_t edge);
 extern uint8_t tach_last_period_high;
 extern uint16_t tach_last_period;
 
-extern volatile uint16_t raw_adc[NUM_ADC_CHANNELS];
-extern volatile unsigned raw_adc_sample_time[NUM_ADC_CHANNELS];
-
 /* Loops per 100msec when not executing the control and monitoring loop.
  * Used for calculating load in operation. */
 extern uint32_t idle_loopcount;
@@ -292,13 +235,7 @@ extern volatile uint32_t clock_1msec;
 extern volatile uint16_t pwm_width;
 extern volatile uint16_t pwm_sr_width;		/* Sync rectification setting */
 
-extern unsigned pwm_deadtime;		/* Timer ticks between lo/hi gate on. */
-
-#if 0
-extern unsigned ocr1a_lpf;	/* ocr1a run through lowpass filter (sort of averaged) */
-extern uint32_t ocr1a_lpf_32; // ocr1a low pass filter sum
-#endif
-
+extern uint8_t pwm_deadtime;		/* Timer ticks between lo/hi gate on. */
 
 /* Motor current sensor: Baseline (quiescent, 0 amp) reading and low fault. */
 extern unsigned baseline_m_current;
