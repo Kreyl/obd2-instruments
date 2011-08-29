@@ -1,6 +1,6 @@
 /* can-control.c: Send CAN messages to the vvvvroom motor controller. */
 /*
-	Written 2010 by Donald Becker and William Carlson.
+	Written 2010-2011 by Donald Becker and William Carlson.
 
 	The original authors may be reached as
 	donald.becker@gmail.com
@@ -18,32 +18,34 @@ static const char versionA[] =
 #include "armduino.h"
 #include "vvvvroom.h"
 
-#else
-#if defined(__AVR_ATmega168__)
+#elif defined(AVR)
+#include <avr/io.h>
+#if defined(IOM8)
+#elif defined(__AVR_ATmega168__)
 #define MEGA168
 #elif defined(__AVR_ATmega1280__)
 #define MEGA1280
+#else
+#warning AVR processor type has not been defined.
 #endif
-
 #include <stdlib.h>
 #include <avr/pgmspace.h>
 #include <avr/interrupt.h>
-#if defined(IOM8)
-#include <avr/iom8.h>
-#elif defined(MEGA168)
-#include <avr/iom168.h>
+
+#elif defined (SDCC_pic16)
+#include <stdint.h>
+#include <pic18fregs.h>
+
 #else
-#include <avr/iom1280.h>
-#endif
+#warning Microcontroller family undefined.
 #endif
 
+#include "vvvvroom.h"
 #include "can.h"
 #include "command.h"
-#include "vvvvroom.h"
-
-uint16_t heartbeat_period = 0;		/* mSec between CAN info transmit. */
 
 config_type config;				/* Must declare, for now. */
+uint16_t heartbeat_period = 0;		/* mSec between CAN info transmit. */
 
 /* Duplicate of the mcp2515.c SPI code, here for test commands. */
 #if defined(STM32)
@@ -60,12 +62,18 @@ config_type config;				/* Must declare, for now. */
 #define SPI_CR1 SPI1_CR1
 #define SPI_CR2 SPI1_CR2
 #define SPI_Transmit(data)  SPDR = data; while( ! (SPSR & SPI_RXNE)) ; SPDR;
-#else
+
+#elif defined(__AVR)
+#define NUM_ADC_CHANNELS 16
 #define PB_CAN_CS DDB0		/* Abitrary digital pin used for active-low /CS */
+#define SPI_RXNE (1<<SPIF)
 #define CAN_CS_ENABLE	PORTB &= ~(1 << PB_CAN_CS);		/* Chip select low */
 #define CAN_CS_DISABLE	PORTB |= (1 << PB_CAN_CS);		/* Chip select high */
 #define SPI_CLK_DIV	(0 << SPR0) /* 0,1,2,3 is divisor by 4,16,64,128  */
-#define SPI_Transmit(data)  SPDR = data; while( ! (SPSR & (1<<SPIF))) ; SPDR;
+#define SPI_Transmit(data)  SPDR = data; while( ! (SPSR & SPI_RXNE)) ; SPDR;
+
+#else
+#warning "This source code version omits the CAN SPI interface."
 #endif
 
 volatile uint16_t raw_adc[NUM_ADC_CHANNELS];
@@ -107,7 +115,7 @@ uint16_t tach_get_QRPM(void)
 }
 
 /* Timer 1 compare/capture interrupt handler.
- * The real time monitoring happens in this function.
+ * The timekeeping and real time monitoring happens in this function.
  */
 ISR(TIM1_UP_TIM16)
 {
@@ -121,7 +129,7 @@ inline unsigned get_time(void)
 	return clock_1msec;
 }
 
-#if ! defined(STM32)
+#if defined(AVR)
 /* Configure the I/O port functions and directions.
  * We set the timer for a 1KHz interrupt.
  */
@@ -285,6 +293,17 @@ static void help(uint16_t val)
 	return;
 }
 
+static void cmd_vars(uint16_t val)
+{
+	int i;
+	serprintf(PSTR("Variable  Value\n"));
+	for (i = 0; cmd_var_table[i].name; i++) {
+		serprintf(PSTR(" %s = %d\n"),
+				  cmd_var_table[i].name, *cmd_var_table[i].ptr);
+	}
+	return;
+}
+
 static void cmd_time(uint16_t val)
 {
 	serprintf(PSTR("Uptime %5d msec\r\n"), get_time());
@@ -321,9 +340,9 @@ static void set_pwm3(uint16_t val)
 static void volts(uint16_t val)
 {
 	int i;
-	/* The PI motor control loop runs the A/D converters.  We must not
-	 * use the ADC if it is running, but need to gather our own
-	 * updated values if it is not.
+	/* If the PI motor control loop is running, it controls the A/D converter
+	 * and updates raw_adc[].  If it's not running we need to gather our own
+	 * updated values.
 	 */
 	for (i = 0; i < NUM_ADC_CHANNELS; i++) {
 		uint16_t voltage = (13*raw_adc[i]) >> 4;
@@ -385,7 +404,7 @@ void mcp2515_reset(uint16_t val)
 		uint8_t status; /* = can_get_status(); */
 		CAN_CS_ENABLE;
 		SPI_Transmit(0xA0);			 /* MCP_ReadStatus */
-		status = SPI_Transmit(0xF0);		/* 0xFF: detect non-response. */
+		status = SPI_Transmit(0xF0);		/* 0xF0: detect non-response. */
 		CAN_CS_DISABLE;
 		if (status != 0xF0) {
 			serprintf(PSTR("Reset status was %2x\r\n"), status);
@@ -457,11 +476,15 @@ void can_heartbeat(uint16_t val)
 /* Send a set-RPM message to the motor controller. */
 void send_rpm_message(uint16_t val)
 {
+	if (val > (6250*4))
+		val = 0;
 	can_cmd.cnt = 0x04;
 	can_cmd.mode = 0x10;
 	can_cmd.pid = 0x42;
 	can_cmd.dataA = val >> 8;
 	can_cmd.dataB = val;
+	can_cmd.dataC = clock_1msec >> 8;
+	can_cmd.dataD = clock_1msec;
 	can_cmd.id = CAN_SID(0x420);
 	CAN_dev_transmit();
 	return;
@@ -472,6 +495,7 @@ struct cmd_var_entry const cmd_var_table[] = {
 	{"misc", &misc, 0,1023},
 	{"pwm", (uint16_t *)&pwm_width, 0, 1000},
 	{"qrpm", &qrpm, 0,0xFFFF},
+	{"verbose", (uint16_t *)&can_verbose, 0, 10},
 	{0, 0, 0, 0},
 };
 
@@ -487,15 +511,17 @@ struct cmd_func_entry const cmd_func_table[] = {
 	{"pwm2", set_pwm2, 0, 0},
 	{"pwm3", set_pwm3, 0, 25000},
 	{"regs", show_regs, 0, 0},
-#if 0
-	{"sleep", mcp2515_sleep, 0, 0},
-	{"status", mcp2515_status, 0, 0},
-#endif
 	{"reset", can_reset, 0, 0},
 	{"rpm", send_rpm_message, 0, 0},
+#if 0
+	{"sleep", mcp2515_sleep, 0, 0},
+	{"start", cmd_start, 0, 0},
+	{"status", mcp2515_status, 0, 0},
+#endif
 	{"stop", can_stop, 0, 0},
 	{"time", cmd_time, 0, 0},
-	{"verbose", set_verbose, 0, 10},
+	{"v", set_verbose, 0, 10},
+	{"vars", cmd_vars, 0, 10},
 	{"volts", volts, 0, 0xFFFF},
 	{"zero", mosi_zero, 0, 0xFFFF},
 	{0, 0, 0, 0},
@@ -504,6 +530,7 @@ struct cmd_func_entry const cmd_func_table[] = {
 
 /* Timestamps for recent actions or events. */
 unsigned tm_can_pkt;					/* Timer for CAN status heartbeat. */
+unsigned can_beat_period = 1000;		/* Period between CAN heartbeats. */
 unsigned tm_last_command, tm_prev_heartbeat;
 
 int main(void)
@@ -553,6 +580,7 @@ int main(void)
 
 	/* Initialize the timekeeping variables. */
 	tm_can_pkt = get_time();
+	serprintf(PSTR("> "));
 
 	/* Our operating loop is mostly non-time-critical code.
 	 * The interesting stuff happens in the interrupt handlers.
