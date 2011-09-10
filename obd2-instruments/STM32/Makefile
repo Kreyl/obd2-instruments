@@ -76,7 +76,7 @@ mcp-can: mcp-can.bin
 	$(STLINK-DOWNLOAD) /dev/stlink erase flash:w:$<
 
 vvvv-main.o stm32-devs.o stm32-adc.o obd2.o pi-loop.o tach.o: vvvvroom.h
-command-plus.o: command.h
+can-control.o motor-commands.o command-plus.o: command.h
 can-control.o obd2.o mcp2515.o bxCAN.o: can.h
 
 clean:
