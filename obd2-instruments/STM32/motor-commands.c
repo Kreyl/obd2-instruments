@@ -21,9 +21,9 @@ static void volts(uint16_t val)
 	/* We should not call show_adc_voltages() while the PI loop is running
 	 * on the AVR, as it disturbs the slow conversion in progress.
 	 * But we can with the STM32. */
-	for (i = 0; i < 18; i++) {
+	for (i = 0; i < NUM_ADC_CHANNELS; i++) {
 		uint16_t voltage = (13*raw_adc[i]) >> 4;
-		serprintf(PSTR("STM ADC%2d %4d %d.%3dV\r\n"),
+		serprintf(PSTR("STM ADC%2d %4d %d.%3dV\n"),
 				  i, raw_adc[i], voltage / 1000, voltage % 1000);
 	}
 	return;
@@ -39,11 +39,23 @@ static void help(uint16_t val)
 	return;
 }
 
+static void cmd_vars(uint16_t val)
+{
+	int i;
+	serprintf(PSTR("Variable  Value\n"));
+	for (i = 0; cmd_var_table[i].name; i++) {
+		serprintf(PSTR(" %s = %d\n"),
+				  cmd_var_table[i].name, *cmd_var_table[i].ptr);
+	}
+	return;
+}
+
 static void idle(uint16_t val)
 {
-	serprintf(PSTR("AVR %d%% idle\r\n"),
+	serprintf(PSTR("CPU %d%% idle\n"),
 			  (unsigned)(wait_time(100) * (unsigned long)100 / idle_loopcount));
 }
+
 static void uptime(uint16_t val)
 {
 	serprintf(PSTR("Uptime %d seconds\n"),
@@ -92,6 +104,7 @@ struct cmd_func_entry const cmd_func_table[] = {
 	{"idle", idle, 0, 0xFFFF},
 	{"restart", restart, 0, 0},
 	{"uptime", uptime, 0, 0},
+	{"vars", cmd_vars, 0, 0xFFFF},
 	{"volts", volts, 0, 0xFFFF},
 	{0, 0, 0, 0},
 };
@@ -104,7 +117,7 @@ struct cmd_func_entry const cmd_func_table[] = {
 void show_cougar_rt_data(void)
 {
 	serprintf(PSTR("TR=%4d CR=%4d CF=%3d PW=%3d HS=%4d RT=%4d "
-				   "FB=%x BA=%d AH=%d.\r\n"),
+				   "FB=%x BA=%d AH=%d.\n"),
 			  rt_data.throttle_ref, rt_data.current_ref, rt_data.current_fb,
 			  pwm_width, rt_data.raw_hs_temp, rt_data.raw_throttle, fault.bits,
 			  rt_data.battery_amps, rt_data.battery_ah);
