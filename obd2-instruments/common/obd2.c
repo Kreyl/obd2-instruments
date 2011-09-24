@@ -99,7 +99,6 @@ extern void *memset(void *s, int c, long n);
 #ifndef tach_get_QRPM
 #define tach_get_QRPM() 1234*4
 #endif
-
 #define use_direct_pwm 0
 #endif
 
@@ -585,7 +584,7 @@ int8_t CAN_init(void)
 	CAN_reset_done = CAN_enabled = 0;
 
 	/* This will be cleaned up after development stabilizes. */
-	if (CAN_reset_done == 0 && CAN_dev_init() != 0)
+	if (CAN_dev_init() != 0)
 		return 1;
 	CAN_reset_done = 1;
 	return 0;
@@ -666,7 +665,7 @@ void CAN_heartbeat(void)
 	can_cmd.mode = 0x10;		/* Our own packet type. */
 	can_cmd.pid = 0x23;
 	can_cmd.dataA = rt_data.throttle_ref >> 1; 	/* Throttle position */
-	can_cmd.dataB = config.motor_sc_amps;
+	can_cmd.dataB = current_fb>>2;
 	can_cmd.dataC = tach_get_QRPM() >> 7;		/* Scaled RPM, 0-8K. */
 	can_cmd.dataD = (125 * (rt_data.raw_hs_temp - 477)) >> 8;
 	can_cmd.unnamed = fault.bits; 			/* Longer than OBD2 responses. */
