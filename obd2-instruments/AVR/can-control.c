@@ -1,6 +1,6 @@
 /* can-control.c: Send CAN messages to the vvvvroom motor controller. */
 /*
-	Written 2010 by Donald Becker and William Carlson.
+	Written 2010-2011 by Donald Becker and William Carlson.
 
 	The original authors may be reached as
 	donald.becker@gmail.com
@@ -18,42 +18,50 @@ static const char versionA[] =
 #include "armduino.h"
 #include "vvvvroom.h"
 
-#else
-#if defined(__AVR_ATmega168__)
+#elif defined(AVR)
+#include <avr/io.h>
+#if defined(IOM8)
+#elif defined(__AVR_ATmega168__)
 #define MEGA168
 #elif defined(__AVR_ATmega1280__)
 #define MEGA1280
+#else
+#warning AVR processor type has not been defined.
 #endif
-
 #include <stdlib.h>
 #include <avr/pgmspace.h>
 #include <avr/interrupt.h>
-#if defined(IOM8)
-#include <avr/iom8.h>
-#elif defined(MEGA168)
-#include <avr/iom168.h>
+
+#elif defined (SDCC_pic16)
+#include <stdint.h>
+#include <pic18fregs.h>
+
 #else
-#include <avr/iom1280.h>
-#endif
+#warning Microcontroller family undefined.
 #endif
 
+#include "vvvvroom.h"
 #include "can.h"
 #include "command.h"
-#include "vvvvroom.h"
-
-uint16_t heartbeat_period = 0;		/* mSec between CAN info transmit. */
 
 config_type config;				/* Must declare, for now. */
+uint16_t heartbeat_period = 0;		/* mSec between CAN info transmit. */
 
 /* Duplicate of the mcp2515.c SPI code, here for test commands. */
-#if defined(STM32)
+#if defined(STM32) || defined (SDCC_pic16)
 #warning "This source code version omits the CAN SPI interface."
-#else
+
+#elif defined(__AVR)
+#define NUM_ADC_CHANNELS 16
 #define PB_CAN_CS DDB0		/* Abitrary digital pin used for active-low /CS */
+#define SPI_RXNE (1<<SPIF)
 #define CAN_CS_ENABLE	PORTB &= ~(1 << PB_CAN_CS);		/* Chip select low */
 #define CAN_CS_DISABLE	PORTB |= (1 << PB_CAN_CS);		/* Chip select high */
 #define SPI_CLK_DIV	(0 << SPR0) /* 0,1,2,3 is divisor by 4,16,64,128  */
-#define SPI_Transmit(data)  SPDR = data; while( ! (SPSR & (1<<SPIF))) ; SPDR;
+#define SPI_Transmit(data)  SPDR = data; while( ! (SPSR & SPI_RXNE)) ; SPDR;
+
+#else
+#warning "This source code version omits the CAN SPI interface."
 #endif
 
 volatile uint16_t raw_adc[NUM_ADC_CHANNELS];
@@ -98,7 +106,7 @@ uint16_t tach_get_QRPM(void)
  * The timekeeping and real time monitoring happens in this function.
  */
 volatile uint16_t clock_1msec;
-volatile uint16_t clock_high;		/* If we ever need more than 65K seconds. */
+volatile uint16_t clock_high;		/* If we ever need more than 65 seconds. */
 ISR(SIG_INPUT_CAPTURE1)
 {
 	static int phase = 0;
@@ -119,7 +127,7 @@ inline unsigned get_time(void)
 	return tsec;
 }
 
-#if ! defined(STM32)
+#if defined(AVR)
 /* Configure the I/O port functions and directions.
  * We set the timer for a 1KHz interrupt.
  */
@@ -195,7 +203,6 @@ void setup_io_ports(void)
 	DDRH = 0x28;
 	return;
 }
-#endif
 
 /* A stub to keep functions unchanged from their operational version. */
 inline void wdt_reset(void)
@@ -227,7 +234,7 @@ static void cmd_vars(uint16_t val)
 
 static void cmd_time(uint16_t val)
 {
-	serprintf(PSTR("Uptime %5d msec\r\n"), get_time());
+	serprintf(PSTR("Uptime %5d msec\n"), get_time());
 	return;
 }
 
@@ -240,19 +247,19 @@ static void volts(uint16_t val)
 	 */
 	for (i = 0; i < NUM_ADC_CHANNELS; i++) {
 		uint16_t voltage = (13*raw_adc[i]) >> 4;
-		serprintf(PSTR("AVR ADC%2d %4d %d.%3dV\r\n"),
+		serprintf(PSTR("AVR ADC%2d %4d %d.%3dV\n"),
 				  i, raw_adc[i], voltage / 1000, voltage % 1000);
 	}
 	return;
 }
 
-void cmd_init(uint16_t val)
+static void cmd_init(uint16_t val)
 {
 	CAN_dev_init();
 	return;
 }
 
-void cmd_start(uint16_t val)
+static void cmd_start(uint16_t val)
 {
 	CAN_dev_start();
 	return;
@@ -264,11 +271,11 @@ void mcp2515_reset(uint16_t val)
 	int i;
 
 	t0 = get_time();
-	serprintf(PSTR("Reset started at %d msec\r\n"), t0);
+	serprintf(PSTR("Reset started at %d msec\n"), t0);
 	i = CAN_dev_init();				/* Takes quite some time. */
 
 	tdiff = get_time() - t0;
-	serprintf(PSTR("Reset took %d usec\r\n"), tdiff);
+	serprintf(PSTR("Reset took %d usec\n"), tdiff);
 
 	/* Wait until a read status command works.
 	 * This typically takes 4 loops after a reset, so allow 10x.*/
@@ -279,13 +286,13 @@ void mcp2515_reset(uint16_t val)
 		status = SPI_Transmit(0xFF);		/* 0xFF: detect non-response. */
 		CAN_CS_DISABLE;
 		if (status != 0xFF) {
-			serprintf(PSTR("Reset status was %2x\r\n"), status);
+			serprintf(PSTR("Reset status was %2x\n"), status);
 			break;
 		}
 	}
 
 	tdiff = get_time() - t0;
-	serprintf(PSTR("Reset took %d loops, %d0 usec, %d to %d \r\n"),
+	serprintf(PSTR("Reset took %d loops, %d0 usec, %d to %d\n"),
 			  i, tdiff, t0, get_time());
 	return;
 }
@@ -326,7 +333,7 @@ void mcp2515_leds(uint16_t val)
 void mcp2515_gppins(uint16_t val)
 {
 	uint8_t pins = mcp2515_get_pins();
-	serprintf(PSTR("Input pins %c %c %c\r\n"),
+	serprintf(PSTR("Input pins %c %c %c\n"),
 			  (pins & 0x08) ? '1' : '0',
 			  (pins & 0x10) ? '1' : '0',
 			  (pins & 0x20) ? '1' : '0');
@@ -419,7 +426,7 @@ int main(void)
 	/* The timers must be running for the CAN controller to work. */
 #if 0						/* Don't.  We need to verify initialization. */
 	if (can_verbose)
-		uart_print(PSTR("Initializing the CAN controller.\r\n"));
+		serprintf(PSTR("Initializing the CAN controller.\n"));
 	can_setup();
 #else
 	DDRB |= ((1<<DDB2)|(1<<DDB1)|(1<<PB_CAN_CS));
