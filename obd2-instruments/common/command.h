@@ -16,21 +16,21 @@
  * The table of variable names that may be interactively set.
  */
 struct cmd_var_entry {
-	PROGMEM char *name;					/* The variable name. */
+	char *name;					/* The variable name. */
 	prog_uint16_t *ptr;			/* A pointer to the variable. */
 	prog_uint16_t min, max;		/* The minimum and maximum values allowed. */
 };
-extern struct cmd_var_entry const cmd_var_table[];
+extern struct cmd_var_entry PROGMEM const cmd_var_table[];
 
 /*
  * A similar table of functions that may be called.
  */
 struct cmd_func_entry {
-	PROGMEM char *name;		   /* The command name. */
+	char *name;		   /* The command name. */
 	void (*funptr)(uint16_t val);
 	prog_uint16_t min, max;	   /* The minimum and maximum values allowed. */
 };
-extern struct cmd_func_entry const cmd_func_table[];
+extern struct cmd_func_entry PROGMEM const cmd_func_table[];
 
 void do_serial_port_char(unsigned char c);
 
