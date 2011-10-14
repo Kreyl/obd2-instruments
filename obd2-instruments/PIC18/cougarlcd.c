@@ -188,10 +188,12 @@ enum LCD_commands {
 };
 
 /* cblock  0x00 */
+#pragma udata gpr0 W_TEMP
 /* Locations for saving context during interrupts. */
 static uint8_t W_TEMP, STATUS_TEMP, BSR_TEMP, Off_temp, Off_tempH;
 static uint16_t Ptr_temp, PROD_temp, Arg2_temp, temp;
 static int16_t avg;
+/* #pragma udata */
 
 /* cblock  0x1A */
 char CNT, CNT1, CNT2, CNT3, CNT4, CNT_Temp;
@@ -278,13 +280,17 @@ void ISRL(void) __naked __interrupt 2
 void HIGH_ISR(void) __naked
 {
 	/* Save the W/working, status and bank select registers */
-	PIR1bits.RCIF = 0;
+	W_TEMP = WREG;
+	STATUS_TEMP = STATUS;
+	BSR_TEMP = BSR;
+
+	PIR1bits.RCIF = 0;			/* Explicitly clear the RO interrupt flag? */
 	if (RX_count == 0)
 		LZstat.CommErr = 0;
 	RX_count++;
 	if (RCSTAbits.FERR)
 		LZstat.CommErr = 1;
-	RX_temp = RCREG;
+	RX_temp = RCREG;		/* Reading RCREG Implicitly clears PIR1bits.RCIF */
 	if (RX_temp != 0x0A) {
 		switch(RX_count) {
 		case 18: CHAR3 = RX_temp; break;
@@ -302,29 +308,10 @@ void HIGH_ISR(void) __naked
 			LZstat.CommErr = 1;
 		RX_count = 0;
 	}
-#if 0
-	{
-		if (RX_count == 18) {
-			CHAR3 = RX_temp;
-			return;
-		}
-		if (RX_count == 19) {
-			CHAR2 = RX_temp;
-			return;
-		}
-		if (RX_count == 20) {
-			CHAR1 = RX_temp;
-			return;
-		}
-		if (RX_count == 33) {
-			CHAR6 = RX_temp;
-		}
-		if (RX_count == 34) {
-			CHAR5 = RX_temp;
-		}
-	}
-#endif
-	/* ToDo: Restore the W/working, status and bank select registers */
+	/* Restore the W/working, status and bank select registers */
+	WREG = W_TEMP;
+	STATUS = STATUS_TEMP;
+	BSR = BSR_TEMP;
 	naked_return;
 }
 
@@ -909,7 +896,7 @@ static void A2DLoop(void)
 #endif
 	}
 
-	/* ADC channel 2, accessory voltage. */
+	/* ADC channel 2, accessory voltage, on a 3.42K/(10K+3.24K) divider */
 	ADCON0 = 0x09;
 	temp = aVavg;
 	Avg_div = 3;
@@ -954,7 +941,9 @@ static void A2DLoop(void)
 	return;
 }
 
-/* Calculate moving average, AVG= Old AVG-(Old Avg/16)+ new sample
+/* Read the A/D converter, averaging with previous samples.
+ * Calculate moving average, AVG= Old AVG-(Old Avg/16)+ new sample.
+ * This is effectively an IIR filter.
  * Return sample sum in tempL/H and new average in avgL/H.
  */
 static void A2DAVG(void)
@@ -962,7 +951,13 @@ static void A2DAVG(void)
 	ADCON0bits.GO_DONE = 1;
 	while (! ADCON0bits.GO_DONE)
 		;
-	temp = avg - (temp>>4) + ADRESH;
+	/* avg = (temp - (temp/16) + ADC) >> Avg_div */
+	avg = temp;
+	avg -= (temp>>4);
+	avg += ADRESH;
+	temp = avg;
+	temp >>= Avg_div;
+	return;
 }
 
 /* Hysteresis for value in TEMP and AVG, based on DEADBAND.
@@ -974,9 +969,10 @@ static void A2DAVG(void)
 static int16_t RES23;
 static void Hysteresis(void)
 {
-	if ((RES23 = temp - avg) < 0)
+	RES23 = temp;
+	if ((RES23 -= avg) < 0)
 		return;
-    if (RES23 > 2)				 
+    if (RES23 >= 2)				 
 		avg = temp;
 	return;
 }
