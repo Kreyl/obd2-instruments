@@ -101,8 +101,8 @@ unsigned char in_pi_loop = 0;
 #define LED_TURNON PORTD |= PD_LED;	/* Force the Cougar "idle" LED on. */
 #define TOGGLE_LED PORTD ^= PD_LED;	/* Toggle the Cougar LED */
 #define close_contactor() PORTD &= ~PD_CONTACTOR;
-#elif defined(GPIOC_ODR)		/* STM32 */
 
+#elif defined(STM32)
 #define close_contactor() GPIOC_BRR = PD_CONTACTOR;
 #define LED_TURNON GPIOC_BSRR = LED_BLUE | LED_GREEN;
 #if defined(QAR)
