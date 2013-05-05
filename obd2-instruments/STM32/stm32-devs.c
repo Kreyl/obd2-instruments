@@ -217,13 +217,14 @@ void setup_io_ports(void)
 	GPIOA_CRL = 0x00004B00;
 
 	/* PA8/TIM1_CH is the primary motor PWM output.
+	 * PA9/10 are USART1 Tx/Rx
 	 * PA11/PA12 are CANRx/Tx
 	 * PA15 is SPI1_SS
 	 */
 	GPIOA_CRH =  0x144A444B;
 	GPIOA_BSRR = 0x80000000;	/* Set PA15 high immediately. */
 
-	/* PB0/1 are ADC8/9, PB6/7 are USART1 Tx/Rx or CAN.
+	/* PB0/1 are ADC8/9, PB6/7 are USART1-remap Tx/Rx or CAN.
 	 * PB0 ADC8 disabled in favor of the QAR LED output GPIO/TIM3_CH3.
 	 * PB2 is boot1, a jumper on the Discovery board, N/C on QAR
 	 * PB3 is PWM3 (#4) on the QAR board, TIM2-CH2-remap
@@ -245,7 +246,7 @@ void setup_io_ports(void)
 		SPI_CR1 = 0x4300 | SPI_SPE | SPI_CLK_DIV | SPI_MSTR;
 		SPI_CR2 = 0;
 	} else
-		GPIOB_CRL = 0x0A1AA00A;
+		GPIOB_CRL = 0x0A1AA001;				/* Was 0x0A1AA00A */
 	/* Set PB13 as an output for TIM1_CH1N. */
 	GPIOB_CRH = 0x00B00000;
 
@@ -311,13 +312,13 @@ void setup_timers(void)
 	TIM3_CCER = 0x1311;			/* Enable channel 4/3(inverted)/2/1 */
 
 	/* Timer 4 as a general-purpose PWM timer
-	 * CH1-remap is PB6, the QAR top open-drain MOSFTET output.
+	 * CH1 is PB6, the QAR top open-drain MOSFTET output.
 	 */
 	TIM4_CR1 = 0x05;
 	TIM4_CCMR1 = 0x6060;			/* Configure channel 1+2 */
 	TIM4_CCMR2 = 0x6060;			/* Configure channel 3+4 */
 	/* No prescaler, count up 24000 (1KHz from the 24MHz PLL).
-	 * This provides a lower frequency output may have better efficiency,
+	 * A low frequency output may have better efficiency,
 	 * but risks audible noise. */
 	TIM4_ARR = 24000;
 	TIM4_CCR1 = TIM4_CCR2 = 0;
