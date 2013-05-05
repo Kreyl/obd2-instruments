@@ -64,9 +64,10 @@ static void uptime(uint16_t val)
 	
 static void restart(uint16_t val)
 {
+	int i;
 	watchdog_enable();
-	while(1)					/* Test the watchdog */
-		;
+	for (i = 10000; i; i--)
+		;					/* Test the watchdog */
 }
 
 struct cmd_var_entry const cmd_var_table[] = {
@@ -114,6 +115,9 @@ struct cmd_func_entry const cmd_func_table[] = {
  * but there are several display apps for the Cougar serial data format.
  * Our code for doing this much simpler since we have printf().
  */
+int raw_throttle_max, raw_throttle_min;
+int motor_pwm_min, motor_pwm_max;
+
 void show_cougar_rt_data(void)
 {
 	serprintf(PSTR("TR=%4d CR=%4d CF=%3d PW=%3d HS=%4d RT=%4d "
@@ -121,6 +125,11 @@ void show_cougar_rt_data(void)
 			  rt_data.throttle_ref, rt_data.current_ref, rt_data.current_fb,
 			  pwm_width, rt_data.raw_hs_temp, rt_data.raw_throttle, fault.bits,
 			  rt_data.battery_amps, rt_data.battery_ah);
+	serprintf(PSTR(" Throttle bounds: %4d-%4d  PWM range%3d-%3d\n"),
+			  raw_throttle_min, raw_throttle_max,
+			  motor_pwm_min, motor_pwm_max);
+	motor_pwm_min = raw_throttle_max = 0;
+	motor_pwm_max = raw_throttle_min = 4096;
 }
 
 
