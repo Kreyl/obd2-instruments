@@ -16,7 +16,15 @@
 
 #define CONCAT1(n,m) USART ## n ## _ ## m
 #define UCONCAT2(n,m) CONCAT1(n,m)
+#if defined(USART_NUM)
+#define USARTNUM USART_NUM
+#else
 #define USARTNUM 2
+#endif
+/* Idiomatic way to get CPP to evaluate parmaters.  Yes, it is wonky. */
+#define _CPP_CONCAT2b(a,b) a ## b
+#define _CPP_CONCAT2a(num) _CPP_CONCAT2b(USART,num)
+#define USART _CPP_CONCAT2a(USARTNUM)
 #define USART_DR UCONCAT2(USARTNUM, DR)
 #define USART_SR UCONCAT2(USARTNUM, SR)
 #define USART_CR1 UCONCAT2(USARTNUM, CR1)
@@ -68,7 +76,7 @@ volatile unsigned long serial_rxbytes = 0;
 /* USART interrupt.
  * The AVR has multiple specific interrupts.
  * The STM32 has a combined interrupt. */
-ISR(USART2)
+IRQHandler(USART)
 {
 	unsigned status;
 	unsigned char c;
