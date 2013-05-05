@@ -19,6 +19,9 @@ static const char versionA[] =
 #include "can.h"
 
 
+extern volatile uint16_t raw_adc[NUM_ADC_CHANNELS];
+extern volatile unsigned raw_adc_sample_time[NUM_ADC_CHANNELS];
+
 /* A/D Converter functions. */
 
 /*
@@ -78,7 +81,7 @@ int adc_setup(void)
 	ADC1_CR2 = ADC_TSVREFE | ADC_CAL | ADC_CONT | ADC_ADON;
 	ADC1_CR2 = ADC_ADON;
 
-#if defined(USE_ADC_DMA) || 1
+#if defined(USE_ADC_DMA) || 0
 	/* Set the regular sequence to 1,2,3..16 */
 	ADC1_SQR1 =      (16-1)<<20 | 15<<15 | 14<<10 | 13<<5 | 12<<0;
 	ADC1_SQR2 = 11<<25 | 10<<20 |  9<<15 |  8<<10 |  7<<5 |  6<<0;
@@ -112,6 +115,7 @@ unsigned int adc_baseline(int8_t channel)
 	return sum >> 4;
 }
 
+#if 0
 /* Show the voltages on the internal ADC.
  * Note that this is strictly start-up debugging.  It can only be called
  * before the timer is triggering A/D conversions.
@@ -140,6 +144,40 @@ void show_adc_voltages(void)
 		voltage = (13*count) >> 4;
 		serprintf(PSTR("STM ADC%2d %4d %d.%3dV\r\n"),
 				  i, count, voltage / 1000, voltage % 1000);
+	}
+	return;
+}
+#endif
+
+/* Print the values in adc_raw[] as voltages.
+ * In normal operation the control loop updates the raw_adc[] values.
+ * If it's not running gather_adc_voltages() should be called to fill
+ * the array.
+ */
+void show_adc_voltages(void)
+{
+	int i;
+
+	serprintf(PSTR("System voltages\r\n"));
+	serprintf(PSTR("STM Vcc %4dmV (%4d)\r\n"),
+			  4096*1200 / (uint32_t) raw_adc[17], raw_adc[17]);
+
+	for (i = 0; i < NUM_ADC_CHANNELS; i++) {
+		uint16_t voltage = (13*raw_adc[i]) >> 4;
+		serprintf(PSTR("STM ADC%2d %4d %d.%3dV\n"),
+				  i, raw_adc[i], voltage / 1000, voltage % 1000);
+	}
+	return;
+}
+void gather_adc_voltages(void)
+{
+	int i;
+
+	/* Assume both the internal 1.2V source and temp sensor are powered. */
+	for (i = 0; i < 18; i++) {
+		start_adc_conversion(i);
+		wdt_reset();
+		raw_adc[i] = read_adc_voltage();
 	}
 	return;
 }
