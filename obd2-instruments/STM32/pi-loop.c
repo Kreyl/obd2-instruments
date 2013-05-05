@@ -48,6 +48,15 @@ unsigned abs(int);
 #define	set_pwm_width(pwm_width, pwm_sr_width) \
 	/* With an 8KHz pulse, the counter goes twice as high, so we scale up. */
 		cli(); OCR3A = pwm_width << 1; OCR3B = pwm_sr_width << 1; sei()
+#else
+#define	set_pwm_width(pwm_width, pwm_sr_width) \
+		do {																\
+			cli();														\
+			OCR3A = pwm_width;											\
+			OCR3C = pwm_width;			/* LED used for bench feedback. */ \
+			OCR3B = pwm_sr_width;										\
+			sei();														\
+		} while(0)
 #endif
 
 #include <util/crc16.h>
@@ -81,9 +90,9 @@ volatile uint16_t pwm_width;
 volatile uint16_t pwm_sr_width;		/* Sync rectification setting */
 
 /* Medium-term PWM average. */
-static unsigned pwm_avg = 0;	// ocr1a run through lowpass filter (sort of averaged)
+static unsigned pwm_avg = 0;
 #if defined(USE_32BIT_PWM_AVG)
-static int32_t pwm_avg_32 = 0;		// ocr1a_lpf_32 low pass filter sum
+static int32_t pwm_avg_32 = 0;
 #endif
 
 /*
@@ -164,10 +173,9 @@ void pi_loop(unsigned raw_m_current, unsigned raw_throttle)
 		current_fb = (motor_current * 19) >> 3;
 	}
 
-	{
-		if (motor_current > m_current_peak)
-			m_current_peak = motor_current;
-	}
+	/* Track the peak observed current. */
+	if (motor_current > m_current_peak)
+		m_current_peak = motor_current;
 
 	/* If we are in fixed-proportional mode or our target current is
 	 * zero, we don't need to do more.
@@ -238,20 +246,22 @@ void pi_loop(unsigned raw_m_current, unsigned raw_throttle)
 			pwm_sr_width = 512;			/* TIMER_TOP + 1 */
 	}
 
+	/* Record the operating extremes. */
+	{
+		extern int motor_pwm_min, motor_pwm_max;
+		if (pwm_width < motor_pwm_min)
+			motor_pwm_min = pwm_width;
+		if (pwm_width > motor_pwm_max)
+			motor_pwm_max = pwm_width;
+	}
 	/* Set the hardware pulse width. */
-#if defined(set_pwm_width)
-	set_pwm_width(pwm_width, pwm_sr_width);
-#else
-	/* Support possible Cougar users. */
-	cli();
-	OCR3A = pwm_width;
-	OCR3C = pwm_width;			/* LED used for bench feedback. */
-	OCR3B = pwm_sr_width;
-	sei();
+#if !defined(set_pwm_width)
+#warning "Macro set_pwm_width() is not defined."
 #endif
+	set_pwm_width(pwm_width, pwm_sr_width);
 
 	/* Calculate the average pulse width over time.
-	 * OCR1A max value is 511, so we can multiply it by up to 127 times
+	 * The max value is 511, so we can multiply it by up to 127 times
 	 */
 #if 1
 	{
@@ -319,13 +329,21 @@ void pi_loop(unsigned raw_m_current, unsigned raw_throttle)
 			}
 			break;
 		}
+		/* Record the operating extremes. */
+		{
+			extern int raw_throttle_max, raw_throttle_min;
+			if (raw_throttle > raw_throttle_max)
+				raw_throttle_max = raw_throttle;
+			if (raw_throttle < raw_throttle_min)
+				raw_throttle_min = raw_throttle;
+		}
 		/* Normalize throttle and scale to [0..511] with minimal ops. */
 		throttle_base = raw_throttle - throttle.closed;
 		if (throttle_base < 0 || throttle_base > throttle.range) {
 			throttle_ref = 0;
 			if (raw_throttle < throttle.low_fail ||
 				raw_throttle > throttle.high_fail) {
-				throttle.fault_counts += 2; 		/* Note "fade" above. */
+				throttle.fault_counts += 2; 	/* Note fault "fade" above. */
 				if (throttle.fault_counts >= THROTTLE_FAULT_COUNTS) {
 					throttle.fault_counts = THROTTLE_FAULT_COUNTS;
 					/* We should record OBD-DTC info here. */
